@@ -1,0 +1,21 @@
+{
+  "forma": "World",
+  "id": "0Q5qJtF-00tjAUfIMTXatW",
+  "name": "nf:~/dev/world",
+  "summary": "/Users/visakha/dev/world/.nameforma",
+  "updateId": "0Q5qJtF-00tjAUfIMTXatW",
+  "focusManager": {
+    "rgaFocusStack": {
+      "forma": "RGA64Stack",
+      "id": "0Q5qJtF-01gaoAjB-pOtNW",
+      "name": "Focus Stack",
+      "summary": "",
+      "updateId": "0Q5qJtF-01gaoAjB-pOtNW",
+      "nodes": []
+    }
+  },
+  "numeronym": {},
+  "watermark": {
+    "20n1YZVkrlNW": "0Q5qJ-SW00ceytYerJkyNW"
+  }
+}
