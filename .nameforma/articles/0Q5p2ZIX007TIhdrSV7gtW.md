@@ -105,7 +105,8 @@ In particular, Apple provides tools for TTS, STT and even has a tiny LLM on iOS 
 - On-device wake-word engine: Apple speech APIs or a small bundled model. Trade-offs: accuracy, battery, privacy.
 
 ### Glossary
-- IaPapo: assistant name and wake word.
+- IaPapo: project name as well as default VA name and wake word.
+- Voice Assistant (VA): a mindful-duplex local chat agent
 - Clef: trial decision model and router. Classifies raw STT into prompt types, using the current state machine. Served as `clef-flash-4bit` by the oMLX server at `localhost:7235` on the M4, through its `/v1/decisions` API. It is not a chat model and rejects `/v1/chat/completions`. Each answer carries a probability per class and a confidence.
 - Prompt types: syncPrompt (a definitional prompt dedicated to aligning chat context between human and agent), actionPrompt, explainPrompt. A decision model classifies prompt types to guide state transitions. Purpose of actionPrompt and explainPrompt to be defined. The set is not fixed.
 - Duplex: full duplex, with mindful state transitions driven by the wake word and idle word. Both sides can transmit at once, and the mic stays live in every state where the app is in the foreground. Standard full-duplex lets any sound interrupt, and it has known problems, so it is not the model.
