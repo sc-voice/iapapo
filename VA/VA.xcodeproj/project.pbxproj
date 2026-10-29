@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F29F3FDF3093B5490097F8D4 /* VACore in Frameworks */ = {isa = PBXBuildFile; productRef = F29F3FDE3093B5490097F8D4 /* VACore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		F29F3FC13093AFC60097F8D4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F29F3FDF3093B5490097F8D4 /* VACore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = VA;
 			packageProductDependencies = (
+				F29F3FDE3093B5490097F8D4 /* VACore */,
 			);
 			productName = VA;
 			productReference = F29F3FB33093AFC50097F8D4 /* VA.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = F29F3FAA3093AFC50097F8D4;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F29F3FDD3093B5490097F8D4 /* XCLocalSwiftPackageReference "../VACore" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F29F3FB43093AFC50097F8D4 /* Products */;
 			projectDirPath = "";
@@ -588,6 +597,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F29F3FDD3093B5490097F8D4 /* XCLocalSwiftPackageReference "../VACore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../VACore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F29F3FDE3093B5490097F8D4 /* VACore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VACore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F29F3FAB3093AFC50097F8D4 /* Project object */;
 }
