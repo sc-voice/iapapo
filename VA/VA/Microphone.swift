@@ -12,6 +12,8 @@ import Observation
 final class Microphone {
     /// Whether the input is capturing.
     private(set) var isOn = false
+    /// Receives each captured buffer on the main actor, in capture order. Set before `start`.
+    var onBuffer: ((AVAudioPCMBuffer) -> Void)?
     /// Input level in dBFS: 0 is full scale, and silence floors at −160.
     private(set) var level: Float = -160
     private var lastLevelUpdate = Date.distantPast
@@ -86,6 +88,7 @@ final class Microphone {
             let dB = Microphone.decibels(of: buffer)
             Task { @MainActor in
                 self?.publish(dB)
+                self?.onBuffer?(buffer)
             }
         }
         do {

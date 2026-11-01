@@ -12,13 +12,11 @@ import VACore
 /// Root view with a Home tab and a Developer tab.
 struct ContentView: View {
     @State private var chatState: VAState = .inactive
-    /// Prompt as it is being spoken and processed.
-    @State private var prompt: String = ""
     @State private var log: EventLog
     @State private var cues: CuePlayer
     @State private var session: AudioSessionModel
     @State private var microphone: Microphone
-    @State private var speech = SpeechModel()
+    @State private var speech: SpeechModel
     /// The reason the last entry was refused, shown in the alert until dismissed.
     @State private var block: EntryBlock?
     /// Shows the speech model download sheet when entry is refused only for a missing model.
@@ -30,10 +28,15 @@ struct ContentView: View {
     init() {
         let log = EventLog()
         let session = AudioSessionModel(log: log)
+        let speech = SpeechModel(log: log)
+        let microphone = Microphone(log: log, session: session)
+        // Every captured buffer goes to the analyzer. Buffers are dropped when nothing is listening.
+        microphone.onBuffer = { speech.feed($0) }
         _log = State(initialValue: log)
         _cues = State(initialValue: CuePlayer(log: log))
         _session = State(initialValue: session)
-        _microphone = State(initialValue: Microphone(log: log, session: session))
+        _speech = State(initialValue: speech)
+        _microphone = State(initialValue: microphone)
     }
 
     /// The name the user sees under the app icon. Read from the bundle, not the internal target name.
@@ -80,10 +83,12 @@ struct ContentView: View {
         chatState = step.state
         if step.state == .inactive {
             microphone.stop()
+            speech.stop()
         }
         session.apply(step.state)
         if step.state != .inactive {
             microphone.start()
+            speech.start()
         }
         VACore.perform(step, with: cues)
     }
@@ -101,7 +106,7 @@ struct ContentView: View {
                     log: log,
                     session: session,
                     speech: speech,
-                    prompt: prompt,
+                    prompt: speech.transcript,
                     onSelect: enter
                 )
             }
