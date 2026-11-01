@@ -6,6 +6,8 @@ public enum Sound: Equatable, Sendable {
     case idle
     case thinking
     case speaking
+    /// Something needs the user's attention, but nothing has failed.
+    case attention
     case error
 }
 

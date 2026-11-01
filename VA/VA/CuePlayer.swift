@@ -16,6 +16,11 @@ final class CuePlayer: Feedback {
     private(set) var lastCue: Sound?
     private var player: AVAudioPlayer?
     private var fadeTask: Task<Void, Never>?
+    private let log: EventLog
+
+    init(log: EventLog) {
+        self.log = log
+    }
 
     func perform(_ effect: Effect) {
         guard case .sound(let sound) = effect else { return }
@@ -30,6 +35,7 @@ final class CuePlayer: Feedback {
         player.play()
         nowPlaying = sound
         lastCue = sound
+        log.record("cue \(sound.resourceName)")
         fadeTask?.cancel()
         fadeTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(duration))

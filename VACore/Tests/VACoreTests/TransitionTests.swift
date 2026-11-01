@@ -75,3 +75,4 @@ final class RecordingFeedback: Feedback {
     perform(transition(from: .idle, on: .heardWakeWord), with: feedback)
     #expect(feedback.effects == [.sound(.listen)])
 }
+
