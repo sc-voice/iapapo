@@ -1,0 +1,267 @@
+"""Train a small CNN wake-word recognizer on the lab take.
+
+Positives are the trimmed wake-word clips, placed at random offsets inside a
+window whose length comes from the trimmed positive duration. Negatives are
+random crops of the negative clips. Every training sample is augmented with a
+random gain and background noise.
+
+Run it through scripts/train.sh, which sets up the environment first.
+"""
+
+import argparse
+import csv
+import glob
+import os
+
+import numpy as np
+import time
+
+import soundfile as sf
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from scipy.signal import resample_poly
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_EXTRA = os.path.join(HERE, "..", "lab", "wakeword", "extra")
+DEFAULT_OUT = os.path.join(HERE, "..", "lab", "wakeword", "out")
+TAKES = os.path.join(HERE, "..", "lab", "wakeword", "takes")
+SR = 16000
+HOP_S = 0.010
+FRAME_S = 0.025
+N_MELS = 40
+HOP_WINDOW_S = 0.25
+
+
+def load_clip(path):
+    """Read a WAV, resample 48 kHz -> 16 kHz, return float32 mono array."""
+    x, sr = sf.read(path, dtype="float32")
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    assert sr == 48000, f"{path}: expected 48 kHz, got {sr}"
+    return resample_poly(x, SR, sr).astype(np.float32)
+
+
+def trim_speech(x, pad_s=0.1, rel_db=-20.0):
+    """Trim to first and last frame above (peak RMS + rel_db), with padding."""
+    n = int(FRAME_S * SR)
+    hop = int(HOP_S * SR)
+    frames = [x[i:i + n] for i in range(0, max(1, len(x) - n), hop)]
+    rms = np.array([np.sqrt(np.mean(f ** 2)) + 1e-9 for f in frames])
+    thresh = rms.max() * 10 ** (rel_db / 20)
+    active = np.where(rms > thresh)[0]
+    if len(active) == 0:
+        return x
+    start = max(0, active[0] * hop - int(pad_s * SR))
+    end = min(len(x), active[-1] * hop + n + int(pad_s * SR))
+    return x[start:end]
+
+
+def mel_filterbank(n_fft, n_mels, sr):
+    """Triangular mel filterbank, shape (n_mels, n_fft // 2 + 1)."""
+    def hz_to_mel(f):
+        return 2595 * np.log10(1 + f / 700)
+
+    def mel_to_hz(m):
+        return 700 * (10 ** (m / 2595) - 1)
+
+    mels = np.linspace(hz_to_mel(0), hz_to_mel(sr / 2), n_mels + 2)
+    bins = np.floor((n_fft + 1) * mel_to_hz(mels) / sr).astype(int)
+    fb = np.zeros((n_mels, n_fft // 2 + 1), dtype=np.float32)
+    for m in range(1, n_mels + 1):
+        l, c, r = bins[m - 1], bins[m], bins[m + 1]
+        for k in range(l, c):
+            fb[m - 1, k] = (k - l) / max(1, c - l)
+        for k in range(c, r):
+            fb[m - 1, k] = (r - k) / max(1, r - c)
+    return torch.from_numpy(fb)
+
+
+N_FFT = int(FRAME_S * SR)
+HOP = int(HOP_S * SR)
+MEL = mel_filterbank(N_FFT, N_MELS, SR)
+WINDOW = torch.hann_window(N_FFT)
+
+
+def log_mel(wave):
+    """(batch, samples) -> (batch, 1, N_MELS, frames) log-mel features."""
+    spec = torch.stft(wave, N_FFT, HOP, window=WINDOW, return_complex=True).abs() ** 2
+    mel = torch.matmul(MEL, spec)
+    return torch.log(mel + 1e-6).unsqueeze(1)
+
+
+class WakeNet(nn.Module):
+    """Three conv blocks over log-mel, global pooling, one logit."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Dropout(0.3), nn.Linear(32, 1),
+        )
+
+    def forward(self, wave):
+        feats = log_mel(wave)
+        feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
+            feats.std(dim=(2, 3), keepdim=True) + 1e-5)
+        return self.net(feats).squeeze(1)
+
+
+def place_in_window(clip, window_len, rng):
+    """Put clip at a random offset inside a zero window of window_len samples."""
+    out = np.zeros(window_len, dtype=np.float32)
+    if len(clip) >= window_len:
+        s = rng.integers(0, len(clip) - window_len + 1)
+        return clip[s:s + window_len]
+    off = rng.integers(0, window_len - len(clip) + 1)
+    out[off:off + len(clip)] = clip
+    return out
+
+
+def augment(x, rng):
+    """Random gain (+-6 dB) and additive noise at a random SNR 10-30 dB."""
+    x = x * 10 ** (rng.uniform(-6, 6) / 20)
+    snr = rng.uniform(10, 30)
+    noise_rms = np.sqrt(np.mean(x ** 2) + 1e-9) / 10 ** (snr / 20)
+    return (x + rng.normal(0, noise_rms, len(x))).astype(np.float32)
+
+
+def sliding_scores(model, clip, window_len):
+    """Score every window of clip at HOP_WINDOW_S spacing. Returns (starts_s, probs)."""
+    hop = int(HOP_WINDOW_S * SR)
+    starts = list(range(0, max(1, len(clip) - window_len + 1), hop))
+    batch = torch.from_numpy(np.stack([
+        np.pad(clip[s:s + window_len], (0, max(0, window_len - len(clip[s:s + window_len]))))
+        for s in starts]))
+    with torch.no_grad():
+        probs = torch.sigmoid(model(batch)).numpy()
+    return np.array(starts) / SR, probs
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt and scores.csv to --out.")
+    ap.add_argument("--take", required=True,
+                    help="take folder with positive-*.wav and negative-*.wav; a bare name is looked up in lab/wakeword/takes/")
+    ap.add_argument("--holdout", nargs="*", default=[],
+                    help="clip names to exclude from training; they are scored and reported as holdout")
+    ap.add_argument("--steps", type=int, default=1500, help="training steps, one random batch each (default 1500)")
+    ap.add_argument("--batch", type=int, default=32, help="samples per step (default 32)")
+    ap.add_argument("--lr", type=float, default=1e-3, help="Adam starting learning rate, cosine-decayed to zero over --steps (default 1e-3)")
+    ap.add_argument("--threshold", type=float, default=0.5, help="probability at which a clip counts as triggered (default 0.5)")
+    ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs (default 0)")
+    ap.add_argument("--extra", default=DEFAULT_EXTRA, help="extra clips added to training (default: lab/wakeword/extra)")
+    ap.add_argument("--no-extra", action="store_true", help="do not use the extra clips")
+    ap.add_argument("--out", default=DEFAULT_OUT, help="output folder for wakenet.pt and scores.csv (default: lab/wakeword/out)")
+    args = ap.parse_args()
+    take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
+    take = os.path.abspath(take)
+    if not os.path.isdir(take):
+        raise SystemExit(f"take directory not found: {take}")
+    if not os.path.isdir(args.out):
+        raise SystemExit(f"output directory not found: {args.out}")
+
+    torch.manual_seed(args.seed)
+    rng = np.random.default_rng(args.seed)
+
+    clips = {}
+    extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))
+    paths = sorted(glob.glob(os.path.join(take, "*.wav")) + extra)
+    for path in paths:
+        name = os.path.splitext(os.path.basename(path))[0]
+        clips[name] = load_clip(path)
+
+    trimmed_pos = {n: trim_speech(x) for n, x in clips.items() if n.startswith("positive")}
+    if not trimmed_pos:
+        raise SystemExit(f"no positive-*.wav clips found in {take} ({len(clips)} clips loaded)")
+    pos_durs = [len(x) / SR for x in trimmed_pos.values()]
+    window_s = float(np.median(pos_durs))
+    window_len = int(window_s * SR)
+    print(f"trimmed positives (s): { {n: round(len(x)/SR, 3) for n, x in trimmed_pos.items()} }")
+    print(f"window length: {window_s:.3f} s (median trimmed positive)")
+
+    train_pos = [x for n, x in trimmed_pos.items() if n not in args.holdout]
+    train_neg = [x for n, x in clips.items()
+                 if n.startswith("negative") and n not in args.holdout]
+    if not train_pos or not train_neg:
+        raise SystemExit("nothing to train on after --holdout")
+    if args.holdout:
+        print(f"holdout (not trained on): {args.holdout}")
+    else:
+        print("WARNING: no holdout. Scores below are on training data, not evaluation.")
+
+    neg_lens = np.array([len(x) for x in train_neg], dtype=float)
+    neg_p = neg_lens / neg_lens.sum()
+
+    def make_batch():
+        labels = rng.integers(0, 2, args.batch)
+        waves = []
+        for y in labels:
+            if y == 1:
+                clip = train_pos[rng.integers(len(train_pos))]
+                waves.append(augment(place_in_window(clip, window_len, rng), rng))
+            else:
+                clip = train_neg[rng.choice(len(train_neg), p=neg_p)]
+                if len(clip) < window_len:
+                    clip = np.pad(clip, (0, window_len - len(clip)))
+                s = rng.integers(0, len(clip) - window_len + 1)
+                waves.append(augment(clip[s:s + window_len], rng))
+        return torch.from_numpy(np.stack(waves)), torch.tensor(labels, dtype=torch.float32)
+
+    model = WakeNet()
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.steps)
+    loss_fn = nn.BCEWithLogitsLoss()
+
+    model.train()
+    running = 0.0
+    start = time.monotonic()
+    print(f"training {args.steps} steps", flush=True)
+    for step in range(1, args.steps + 1):
+        wave, y = make_batch()
+        loss = loss_fn(model(wave), y)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        sched.step()
+        running = 0.98 * running + 0.02 * loss.item() if step > 1 else loss.item()
+        if step % 25 == 0 or step == args.steps:
+            elapsed = time.monotonic() - start
+            eta = elapsed / step * (args.steps - step)
+            print(f"\r\033[32mstep {step:5d}/{args.steps}  loss {running:.4f}  "
+                  f"elapsed {elapsed:6.1f}s  eta {eta:6.1f}s\033[0m", end="", flush=True)
+    print()
+
+    model.eval()
+    torch.save(model.state_dict(), os.path.join(args.out, "wakenet.pt"))
+
+    rows = []
+    trig = {"positive": [0, 0], "negative": [0, 0]}
+    for name, x in clips.items():
+        label = "positive" if name.startswith("positive") else "negative"
+        role = "holdout" if name in args.holdout else "train"
+        if label == "positive":
+            x = trimmed_pos[name]
+        starts, probs = sliding_scores(model, x, window_len)
+        for t, p in zip(starts, probs):
+            rows.append([name, label, role, round(float(t), 3), round(float(p), 4)])
+        hit = bool((probs >= args.threshold).any())
+        trig[label][0] += int(hit)
+        trig[label][1] += 1
+        print(f"{name:14s} {label:8s} {role:8s} max={probs.max():.3f} triggered={hit}")
+
+    with open(os.path.join(args.out, "scores.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["clip", "label", "role", "start_s", "prob"])
+        w.writerows(rows)
+
+    print(f"\nclips triggered at p>={args.threshold}:")
+    print(f"  positives {trig['positive'][0]}/{trig['positive'][1]}")
+    print(f"  negatives {trig['negative'][0]}/{trig['negative'][1]}")
+    print(f"saved: {os.path.join(args.out, 'wakenet.pt')}, {os.path.join(args.out, 'scores.csv')}")
+
+
+if __name__ == "__main__":
+    main()

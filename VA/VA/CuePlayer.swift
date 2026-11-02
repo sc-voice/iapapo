@@ -27,6 +27,11 @@ final class CuePlayer: Feedback {
         play(sound)
     }
 
+    /// Returns when the cue started by the latest `perform` has finished, or at once if none is playing.
+    func untilSilent() async {
+        await fadeTask?.value
+    }
+
     private func play(_ sound: Sound) {
         guard let url = Bundle.main.url(forResource: sound.resourceName, withExtension: "m4a"),
               let player = try? AVAudioPlayer(contentsOf: url) else { return }

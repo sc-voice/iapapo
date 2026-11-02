@@ -9,6 +9,8 @@ public enum Sound: Equatable, Sendable {
     /// Something needs the user's attention, but nothing has failed.
     case attention
     case error
+    /// Played when the training wizard opens. File: `trainIapapo.m4a`.
+    case trainIapapo
 }
 
 /// Side effects the app performs after a transition.

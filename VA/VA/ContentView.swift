@@ -17,6 +17,11 @@ struct ContentView: View {
     @State private var session: AudioSessionModel
     @State private var microphone: Microphone
     @State private var speech: SpeechModel
+    @State private var recorder: ClipRecorder
+    /// The folder for the current recording session, created on the first sample.
+    @State private var take: URL?
+    /// The clip being written between `beginClip` and `endClip`, if any.
+    @State private var openClip: URL?
     /// The reason the last entry was refused, shown in the alert until dismissed.
     @State private var block: EntryBlock?
     /// Shows the speech model download sheet when entry is refused only for a missing model.
@@ -30,13 +35,65 @@ struct ContentView: View {
         let session = AudioSessionModel(log: log)
         let speech = SpeechModel(log: log)
         let microphone = Microphone(log: log, session: session)
-        // Every captured buffer goes to the analyzer. Buffers are dropped when nothing is listening.
-        microphone.onBuffer = { speech.feed($0) }
+        let recorder = ClipRecorder(log: log)
+        // Every captured buffer goes to the analyzer and the sample recorder. Both drop it when idle.
+        microphone.onBuffer = {
+            speech.feed($0)
+            recorder.capture($0)
+        }
         _log = State(initialValue: log)
         _cues = State(initialValue: CuePlayer(log: log))
         _session = State(initialValue: session)
         _speech = State(initialValue: speech)
         _microphone = State(initialValue: microphone)
+        _recorder = State(initialValue: recorder)
+    }
+
+    /// Arms the recorder for one clip of `label` in the current take. The clip stays open until `endClip`.
+    /// Audio is captured only once the mic is running, so an entry cue played before that is not recorded.
+    private func beginClip(_ label: SampleLabel) async -> Bool {
+        do {
+            let store = SampleStore()
+            let current: URL
+            if let existing = take {
+                current = existing
+            } else {
+                current = try store.newTake()
+                recorder.resetFloor()
+            }
+            take = current
+            let url = try store.nextClipURL(label, in: current)
+            openClip = url
+            // The listening cue is playing now. Record only after it ends, so the cue is not in the sample.
+            await cues.untilSilent()
+            guard openClip == url else { return false }
+            recorder.start(writingTo: url, label: label)
+            return true
+        } catch {
+            log.record("sample error: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Closes the open clip. Keeps the file when `keep` is true and it passes `ClipCheck`, otherwise deletes it.
+    /// Returns whether the clip was kept.
+    private func endClip(keep: Bool) -> Bool {
+        let reason = keep ? recorder.rejectionReason() : nil
+        if keep, reason == nil {
+            recorder.keepClipFrames()
+        }
+        recorder.stop()
+        guard let url = openClip else { return false }
+        openClip = nil
+        if keep, reason == nil {
+            log.record("sample saved: \(url.lastPathComponent)")
+            return true
+        }
+        if let reason {
+            log.record("sample rejected: \(reason)")
+        }
+        try? FileManager.default.removeItem(at: url)
+        return false
     }
 
     /// The name the user sees under the app icon. Read from the bundle, not the internal target name.
@@ -86,11 +143,16 @@ struct ContentView: View {
             speech.stop()
         }
         session.apply(step.state)
-        if step.state != .inactive {
+        VACore.perform(step, with: cues)
+        guard step.state != .inactive else { return }
+        // The mic opens after the entry cue ends, so the recognizer doesn't hear the cue's own speech.
+        Task {
+            await cues.untilSilent()
+            // Skip if the chat has moved on while the cue played.
+            guard chatState == step.state else { return }
             microphone.start()
             speech.start()
         }
-        VACore.perform(step, with: cues)
     }
 
     var body: some View {
@@ -107,7 +169,9 @@ struct ContentView: View {
                     session: session,
                     speech: speech,
                     prompt: speech.transcript,
-                    onSelect: enter
+                    onSelect: enter,
+                    onBeginClip: beginClip,
+                    onEndClip: endClip
                 )
             }
         }
@@ -173,6 +237,10 @@ struct DeveloperView: View {
     let speech: SpeechModel
     let prompt: String
     let onSelect: (VAState) -> Void
+    let onBeginClip: (SampleLabel) async -> Bool
+    let onEndClip: (Bool) -> Bool
+    /// Whether the training wizard sheet is open.
+    @State private var showWizard = false
 
     /// Green while capturing, gray when off. Off is a normal state, not an error.
     private var micColor: Color {
@@ -204,6 +272,7 @@ struct DeveloperView: View {
         HStack(alignment: .top) {
             Form {
                 stateSection
+                samplesSection
             }
             .frame(maxWidth: .infinity)
             // Log and prompt share the right side equally.
@@ -249,6 +318,28 @@ struct DeveloperView: View {
             }
         }
         .padding(.horizontal)
+    }
+
+    /// Opens the training wizard, which records wake-word samples. Needs the mic on.
+    private var samplesSection: some View {
+        Section("Wake Word") {
+            Button("Train IaPapo") {
+                cues.perform(.sound(.trainIapapo))
+                showWizard = true
+            }
+                .sheet(isPresented: $showWizard) {
+                    TrainingWizard(
+                        microphoneOn: microphone.isOn,
+                        level: microphone.level,
+                        transcript: prompt,
+                        onEnter: onSelect,
+                        onBeginClip: onBeginClip,
+                        onEndClip: onEndClip
+                    ) {
+                        showWizard = false
+                    }
+                }
+        }
     }
 
     private var stateSection: some View {

@@ -409,6 +409,7 @@
 				DEVELOPMENT_TEAM = ZDN9AX64KC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = IaPapo;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "IaPapo listens for your voice to respond.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "IaPapo converts your speech to text.";
@@ -448,6 +449,7 @@
 				DEVELOPMENT_TEAM = ZDN9AX64KC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = IaPapo;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "IaPapo listens for your voice to respond.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "IaPapo converts your speech to text.";
