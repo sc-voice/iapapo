@@ -9,14 +9,19 @@
 #   - on first run only, creates the virtualenv lab/wakeword/.venv and installs
 #     numpy, scipy, soundfile and torch into it
 #   - trains on one take folder plus optional extra clips, then scores every clip
+#   - writes each run to <out>/<version>/<take>-<run id>/ containing wakenet.pt,
+#     scores.csv and run.json
+#       version: first 6 chars of the nf id --file-mod timeId of train.py
+#       run id:  first 6 chars of a fresh nf id
 #
 # Usage:
-#   scripts/train.sh --take <name> [--out <dir>] [--extra <dir>] [--no-extra]
+#   scripts/train.sh [--take <name>] [--out <dir>] [--extra <dir>] [--no-extra]
 #                    [--holdout <clip> ...] [--steps N]
 #
 #   --take     a folder name under lab/wakeword/takes/, or a path containing a slash
+#              (default: most recent take on any device)
 #   --holdout  clips to exclude from training, reported as holdout in scores.csv
-#   --out      default lab/wakeword/out
+#   --out      output root, default lab/wakeword/out
 #   --extra    default lab/wakeword/extra
 #
 # Example:
@@ -35,11 +40,6 @@ case "${1:-}" in
         ;;
 esac
 
-if [ $# -eq 0 ]; then
-    print_help >&2
-    exit 2
-fi
-
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WAKEWORD="$HERE/../lab/wakeword"
 VENV="$WAKEWORD/.venv"
@@ -48,7 +48,12 @@ mkdir -p "$WAKEWORD/takes" "$WAKEWORD/extra" "$WAKEWORD/out"
 
 if [ ! -x "$VENV/bin/python" ]; then
     python3 -m venv "$VENV"
-    "$VENV/bin/pip" install numpy scipy soundfile torch
+    "$VENV/bin/pip" install numpy scipy soundfile torch audiomentations
 fi
 
-exec "$VENV/bin/python" "$HERE/train.py" "$@"
+# Version is the first 6 characters of the file-modification timeId of train.py.
+# Run ID is the first 6 characters of a fresh nf id.
+TRAIN_VERSION="$(nf id --file-mod "$HERE/train.py" | cut -c1-6)"
+RUN_ID="$(nf id | cut -c1-6)"
+
+exec "$VENV/bin/python" "$HERE/train.py" --version "$TRAIN_VERSION" --run-id "$RUN_ID" "$@"

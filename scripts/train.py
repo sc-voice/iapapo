@@ -11,7 +11,11 @@ Run it through scripts/train.sh, which sets up the environment first.
 import argparse
 import csv
 import glob
+import json
 import os
+import random
+import re
+import sys
 
 import numpy as np
 import time
@@ -21,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.signal import resample_poly
+from audiomentations import AddBackgroundNoise, AddGaussianSNR, Compose, Gain, TimeStretch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_EXTRA = os.path.join(HERE, "..", "lab", "wakeword", "extra")
@@ -31,6 +36,25 @@ HOP_S = 0.010
 FRAME_S = 0.025
 N_MELS = 40
 HOP_WINDOW_S = 0.25
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
+
+
+class Tee:
+    """Write to the terminal unchanged and to run.log as plain text (no ANSI codes or carriage returns)."""
+
+    def __init__(self, term, log):
+        self.term = term
+        self.log = log
+
+    def write(self, s):
+        self.term.write(s)
+        self.log.write(ANSI.sub("", s).replace("\r", ""))
+
+    def flush(self):
+        self.term.flush()
+        self.log.flush()
 
 
 def load_clip(path):
@@ -120,12 +144,19 @@ def place_in_window(clip, window_len, rng):
     return out
 
 
-def augment(x, rng):
-    """Random gain (+-6 dB) and additive noise at a random SNR 10-30 dB."""
-    x = x * 10 ** (rng.uniform(-6, 6) / 20)
-    snr = rng.uniform(10, 30)
-    noise_rms = np.sqrt(np.mean(x ** 2) + 1e-9) / 10 ** (snr / 20)
-    return (x + rng.normal(0, noise_rms, len(x))).astype(np.float32)
+NOISE_DIR = os.path.join(HERE, "..", "lab", "wakeword", "noise")
+
+AUGMENT = Compose([
+    TimeStretch(min_rate=0.9, max_rate=1.1, leave_length_unchanged=True, p=0.5),
+    Gain(min_gain_db=-6, max_gain_db=6, p=1.0),
+    AddGaussianSNR(min_snr_db=10, max_snr_db=30, p=1.0),
+    AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=3, max_snr_db=30, p=0.5),
+])
+
+
+def augment(x):
+    """audiomentations: time stretch 0.9-1.1x (p=0.5), gain +-6 dB, Gaussian noise at 10-30 dB SNR. Length is preserved."""
+    return AUGMENT(samples=x, sample_rate=SR).astype(np.float32)
 
 
 def sliding_scores(model, clip, window_len):
@@ -142,9 +173,9 @@ def sliding_scores(model, clip, window_len):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt and scores.csv to --out.")
-    ap.add_argument("--take", required=True,
-                    help="take folder with positive-*.wav and negative-*.wav; a bare name is looked up in lab/wakeword/takes/")
+        description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt, scores.csv and run.json to a run folder under --out.")
+    ap.add_argument("--take", default=None,
+                    help="take folder with positive-*.wav and negative-*.wav; a bare name is looked up in lab/wakeword/takes/ (default: most recent take on any device)")
     ap.add_argument("--holdout", nargs="*", default=[],
                     help="clip names to exclude from training; they are scored and reported as holdout")
     ap.add_argument("--steps", type=int, default=1500, help="training steps, one random batch each (default 1500)")
@@ -154,17 +185,31 @@ def main():
     ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs (default 0)")
     ap.add_argument("--extra", default=DEFAULT_EXTRA, help="extra clips added to training (default: lab/wakeword/extra)")
     ap.add_argument("--no-extra", action="store_true", help="do not use the extra clips")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="output folder for wakenet.pt and scores.csv (default: lab/wakeword/out)")
+    ap.add_argument("--out", default=DEFAULT_OUT, help="output root; run folder is <out>/<version>/<take>-<run-id>/ (default: lab/wakeword/out)")
+    ap.add_argument("--version", required=True, help="version of this script, recorded in run.json (set by scripts/train.sh)")
+    ap.add_argument("--run-id", required=True, help="run identifier, appended to the run folder name (set by scripts/train.sh)")
     args = ap.parse_args()
-    take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
+    if args.take is None:
+        candidates = [d for d in glob.glob(os.path.join(TAKES, "*", "*")) if os.path.isdir(d)]
+        if not candidates:
+            raise SystemExit(f"no takes found under {TAKES}")
+        take = max(candidates, key=os.path.basename)
+        print(f"using most recent take: {take}")
+    else:
+        take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
     take = os.path.abspath(take)
+    args.take = take
     if not os.path.isdir(take):
         raise SystemExit(f"take directory not found: {take}")
-    if not os.path.isdir(args.out):
-        raise SystemExit(f"output directory not found: {args.out}")
+    args.out = os.path.join(args.out, args.version, f"{os.path.basename(take)}-{args.run_id}")
+    os.makedirs(args.out, exist_ok=False)
+    TTY = sys.stdout.isatty()
+    sys.stdout = Tee(sys.stdout, open(os.path.join(args.out, "run.log"), "w"))
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
+    random.seed(args.seed)  # audiomentations draws from the global random and numpy generators
+    np.random.seed(args.seed)
 
     clips = {}
     extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))
@@ -177,10 +222,10 @@ def main():
     if not trimmed_pos:
         raise SystemExit(f"no positive-*.wav clips found in {take} ({len(clips)} clips loaded)")
     pos_durs = [len(x) / SR for x in trimmed_pos.values()]
-    window_s = float(np.median(pos_durs))
+    window_s = float(max(pos_durs))  # longest positive, so every wake word fits whole in a window
     window_len = int(window_s * SR)
     print(f"trimmed positives (s): { {n: round(len(x)/SR, 3) for n, x in trimmed_pos.items()} }")
-    print(f"window length: {window_s:.3f} s (median trimmed positive)")
+    print(f"window length: {window_s:.3f} s (longest trimmed positive)")
 
     train_pos = [x for n, x in trimmed_pos.items() if n not in args.holdout]
     train_neg = [x for n, x in clips.items()
@@ -201,13 +246,13 @@ def main():
         for y in labels:
             if y == 1:
                 clip = train_pos[rng.integers(len(train_pos))]
-                waves.append(augment(place_in_window(clip, window_len, rng), rng))
+                waves.append(augment(place_in_window(clip, window_len, rng)))
             else:
                 clip = train_neg[rng.choice(len(train_neg), p=neg_p)]
                 if len(clip) < window_len:
                     clip = np.pad(clip, (0, window_len - len(clip)))
                 s = rng.integers(0, len(clip) - window_len + 1)
-                waves.append(augment(clip[s:s + window_len], rng))
+                waves.append(augment(clip[s:s + window_len]))
         return torch.from_numpy(np.stack(waves)), torch.tensor(labels, dtype=torch.float32)
 
     model = WakeNet()
@@ -227,12 +272,18 @@ def main():
         opt.step()
         sched.step()
         running = 0.98 * running + 0.02 * loss.item() if step > 1 else loss.item()
-        if step % 25 == 0 or step == args.steps:
+        if step == args.steps or (TTY and step % 25 == 0):
             elapsed = time.monotonic() - start
             eta = elapsed / step * (args.steps - step)
-            print(f"\r\033[32mstep {step:5d}/{args.steps}  loss {running:.4f}  "
-                  f"elapsed {elapsed:6.1f}s  eta {eta:6.1f}s\033[0m", end="", flush=True)
-    print()
+            msg = f"step {step:5d}/{args.steps}  loss {running:.4f}  elapsed {elapsed:6.1f}s  eta {eta:6.1f}s"
+            if TTY and step != args.steps:
+                # in-place progress line: terminal only, never written to run.log
+                sys.__stdout__.write(f"\r\033[32m{msg}\033[0m")
+                sys.__stdout__.flush()
+            elif TTY:
+                print(f"\r\033[32m{msg}\033[0m\033[K")
+            else:
+                print(msg)
 
     model.eval()
     torch.save(model.state_dict(), os.path.join(args.out, "wakenet.pt"))
@@ -256,6 +307,9 @@ def main():
         w = csv.writer(f)
         w.writerow(["clip", "label", "role", "start_s", "prob"])
         w.writerows(rows)
+
+    with open(os.path.join(args.out, "run.json"), "w") as f:
+        json.dump({"version": args.version, "args": vars(args)}, f, indent=2)
 
     print(f"\nclips triggered at p>={args.threshold}:")
     print(f"  positives {trig['positive'][0]}/{trig['positive'][1]}")
