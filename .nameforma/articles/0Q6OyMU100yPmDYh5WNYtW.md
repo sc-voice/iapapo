@@ -13,11 +13,11 @@ This is the first training experiment for the IaPapo wake word, following the mi
 
 ## Data
 
-Source: take `20261101-130400` in the app's `Documents/WakeWord/`, copied from the iPad to `lab/wakeword/20261101-130400/` (git-ignored via `lab`).
+Source: take `20261101-130400`, recorded by the Training Wizard on the iPad and copied to the local lab folder (git-ignored). The training runs so far use the later take `20261102-082403` from the same device. The table below describes the earlier take.
 
 | File | Label | Length | How it ended |
 |---|---|---|---|
-| negative-001 | negative | 4.0 s | mic-check sentence, ended on match |
+| negative-001 | negative | 4.0 s | prompt "We are testing the microphone", ended on match |
 | negative-002 | negative | 3.0 s | prompt matched |
 | negative-003 | negative | 10.6 s | timeout; about 0.6 s over the 10 s cap |
 | negative-004 | negative | 7.0 s | prompt matched |
@@ -29,39 +29,73 @@ Format of every clip: WAVE, mono, 48 kHz, Float32.
 
 Gaps against the plan in [[0Q6My1bn00B6S0Bm_cAcdW]]:
 
-- **Negatives, general:** the three long PVA requests (happy, sad, neutral) are not recorded yet. The wizard's negatives are the mic-check sentence, "I love Iowa Popovers…", and a weather question.
+- **Negatives, general:** the three long PVA requests (happy, sad, neutral) are not recorded yet. The wizard's negatives are the prompts listed under Labels.
 - **Negatives, self-echo:** no `say` clips played through the speakers and picked up by the mic.
 - **Embedded mentions:** not recorded. Whether they count as positives or negatives is still open.
 - **Speakers:** one speaker, one device.
 
 ## Labels
 
-- `positive-*`: wake word. The recognizer ignores case, so the three variants are all positives.
-- `negative-*`: no wake word. The mic-check negative and the prompt-matched negatives are kept as they are.
+The wizard has six prompts:
+
+1. "IaPapo": positive
+2. "IAPAPO!": positive
+3. "IaPapo?": positive
+4. "We are testing the microphone": negative
+5. "I love Iowa Popovers. Do you have a recipe?": negative
+6. "I am really worried about the weather tomorrow. What's the forecast?": negative
+
+All negatives are prompt-based and are kept as they are.
 
 ## Pipeline
 
-1. Resample every clip to one rate, and downmix to mono if needed. The clips are already mono.
-2. Trim each positive to its speech onset and offset. Trimming is for training only; do not change the saved files.
-3. Cut negatives into overlapping windows. Set the window length from the trimmed positive duration, so clip length cannot separate the classes.
-4. Extract features and train a small classifier. The model type is open; the article lists a dedicated on-device net, a third-party toolkit, and a Core ML conversion.
-5. Export the model and log its scores for each window.
+1. Resample every clip from 48 kHz to 16 kHz, and average channels if a clip is not mono (the training script's loader). The wizard clips are already mono.
+2. Trim each positive and each negative to its speech onset and offset. Trimming is for training only; do not change the saved files.
+3. Set the window length to the longest trimmed positive, 0.855 s, so every wake word fits whole in a window. Scoring slides the window every 0.25 s.
+4. Extract log-mel features (25 ms frames, 10 ms hop, 40 mel bands) and train `WakeNet`, a three-block CNN, in PyTorch.
+5. Save the weights and log each clip's window scores to `scores.csv`, in a per-run folder named by version, take and run ID. Export to Core ML is planned, not yet done.
 
 ## Evaluation
 
-- **Held-out data:** these seven clips cannot evaluate themselves. Hold out a whole take, or record a new one, before trusting any score.
+- **Held-out data:** the training clips cannot evaluate themselves. Hold out a whole take, or record a new one, before trusting any score.
 - **Per-source counts:** count triggers on positives and on negatives separately, as the article suggests, so a false trigger on the user's own speech is visible.
 - **Success for this experiment:** the model triggers on held-out "IaPapo" clips and stays quiet on held-out negatives. A pass here does not yet cover other voices or rooms.
+- **Current result (training clips only, no holdout):** run `0Q6YVH` (version `0Q6YVG`), with trimmed negatives and the longest window. All positives triggered (max 0.972 to 0.988). No negatives triggered (max 0.009 to 0.126). This does not meet the success criterion yet, because it has no held-out data.
 
 ## Decisions
 
-- Model type and framework.
-- Window length and hop size.
-- Whether to keep the mic-check negative, which contains the wake-word-free check sentence.
-- Whether the timed negatives should be re-recorded at a fixed length, given the 10.6 s clip.
+Made, as the code shows:
+
+- Model: `WakeNet`, a small CNN over log-mel features, trained in PyTorch.
+- Window length: longest trimmed positive, 0.855 s.
+- Front end: 16 kHz, 25 ms frames, 10 ms hop, 40 mel bands.
+- Negatives are trimmed like positives. Silence is controlled by trimming, and background noise is added as augmentation, so no silence-only file is needed.
+- Model location: the app's Documents/models folder, exposed through file sharing so the user and Xcode can both reach it. Interim. It is included in backups by default, which is covered by the privacy open item.
+- Config file: a JSON file, generated by the export script, holds the settings the app reads (sample rate, window and hop sizes, frame and mel settings, threshold, model file, run ID). A `notes` object holds the training scores as documentation, and the app ignores it.
+- First Swift version is inference only. No on-device update until the hybrid pipeline question is settled.
+- Export target: Core ML ML Program. On-device update of the final layer is unconfirmed in this format (see open items).
+- Data collection: use the iPhone to record training clips from a larger population, so a base model can be trained on varied voices and the final layer can be updated on device for each user.
+
+Still open:
+
+- Whether embedded mentions count as positives or negatives.
+- Swift front end: which package it lives in (proposed: the `VACore` package, so its tests run under `make test-core`), which resampling method matches the training loader, and the iPad's capture rate.
+- Privacy of training audio and the model. The takes are the user's voice, and the model is trained on it. Open questions: whether iCloud Drive or device backup can hold them, whether Advanced Data Protection is on, and whether the Mac's synced folders could pick them up. Parked.
+- Hybrid pipeline for on-device update: an ML Program trunk with an updatable neural-network head, combined in a pipeline. Parked. Unconfirmed whether a mixed pipeline can be updated with `MLUpdateTask`.
+
+## Future proposal: base model with a voice holdout
+
+Proposed, not decided. Train a base model on recordings from many speakers saying the wake word and the wizard prompts. Then use the user's own voice as the holdout, to test whether the base generalises to a voice it never trained on.
+
+- **Keep the holdout separate.** The user's takes used for personal fine-tuning must not be the holdout takes.
+- **Prefer real recordings.** Text-to-speech voices would test a different gap than real speakers.
+- **Use the wizard prompts** in the holdout, so the test measures voice, not wording.
 
 ## Next steps
 
 1. Record the happy, sad, and neutral requests as negatives.
 2. Record `say` clips through the speakers as self-echo negatives.
-3. Run the minimal experiment on this take, with a held-out take for evaluation.
+3. Record a held-out take, and evaluate the current model on it.
+4. Export `wakenet.pt` to Core ML at the 0.855 s window, and check its outputs against PyTorch.
+5. Port the front end to Swift, and test its features against the Python ones.
+6. Add an on-device update of the final layer, once the export works.

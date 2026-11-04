@@ -8,8 +8,9 @@ help:
 	@echo ""
 	@echo "  make build-core   Build VACore package"
 	@echo "  make test-core    Run VACore tests"
+	@echo "  make test-py      Run Core ML parity test on a wake-word run (RUN=<run folder>)"
 	@echo "  make build-app    Build VA app for iOS Simulator"
-	@echo "  make test         Run VACore and VA app tests"
+	@echo "  make test-all     Run VACore, VA app and Core ML parity tests"
 	@echo "  make test-app     Run VA app tests"
 	@echo "  make clean-core   Clean VACore build artifacts"
 	@echo "  make clean-app    Clean VA app build artifacts"
@@ -24,7 +25,14 @@ test-core:
 build-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' build
 
-test: test-core test-app
+# Core ML parity for one wake-word run. The run folder must already hold wakenet.pt,
+# wakenet.mlpackage (scripts/export_coreml.py) and run.json. Override with RUN=<folder>.
+RUN ?= lab/wakeword/out/0Q6YVG/20261102-082403-0Q6YVH
+
+test-py:
+	lab/wakeword/.venv-export/bin/python scripts/test_coreml_parity.py $(RUN)
+
+test-all: test-core test-app test-py
 
 test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test

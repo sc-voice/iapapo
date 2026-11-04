@@ -228,7 +228,7 @@ def main():
     print(f"window length: {window_s:.3f} s (longest trimmed positive)")
 
     train_pos = [x for n, x in trimmed_pos.items() if n not in args.holdout]
-    train_neg = [x for n, x in clips.items()
+    train_neg = [trim_speech(x) for n, x in clips.items()
                  if n.startswith("negative") and n not in args.holdout]
     if not train_pos or not train_neg:
         raise SystemExit("nothing to train on after --holdout")
