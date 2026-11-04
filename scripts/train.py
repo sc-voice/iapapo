@@ -156,12 +156,14 @@ def place_in_window(clip, window_len, rng):
 
 NOISE_DIR = os.path.join(HERE, "..", "lab", "wakeword", "noise")
 
-AUGMENT = Compose([
+_AUGMENTS = [
     TimeStretch(min_rate=0.9, max_rate=1.1, leave_length_unchanged=True, p=0.5),
     Gain(min_gain_db=-6, max_gain_db=6, p=1.0),
     AddGaussianSNR(min_snr_db=10, max_snr_db=30, p=1.0),
-    AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=3, max_snr_db=30, p=0.5),
-])
+]
+if glob.glob(os.path.join(NOISE_DIR, "*.wav")):
+    _AUGMENTS.append(AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=3, max_snr_db=30, p=0.5))
+AUGMENT = Compose(_AUGMENTS)
 
 
 def augment(x):
@@ -187,7 +189,7 @@ def main():
     ap.add_argument("--media", default=DEFAULT_MEDIA,
                     help="folder with iapapo/ (positives) and negative/ (negatives) m4a clips, used for training (default: media)")
     ap.add_argument("--take", default=None,
-                    help="iPad take folder of positive-*.wav and negative-*.wav, scored as holdout and never trained on; a bare name is looked up in lab/wakeword/takes/ (default: most recent take)")
+                    help="iPad take folder of positive-*.wav and negative-*.wav, scored as holdout and never trained on; a bare name is looked up in lab/wakeword/takes/ (default: none, agent holdouts only)")
     ap.add_argument("--holdout", nargs="*", default=[],
                     help="clip names to exclude from training; they are scored and reported as holdout")
     ap.add_argument("--steps", type=int, default=1500, help="training steps, one random batch each (default 1500)")
@@ -202,9 +204,7 @@ def main():
     ap.add_argument("--run-id", required=True, help="run identifier, appended to the run folder name (set by scripts/train.sh)")
     args = ap.parse_args()
     if args.take is None:
-        candidates = [d for d in glob.glob(os.path.join(TAKES, "*", "*")) if os.path.isdir(d)]
-        take = max(candidates, key=os.path.basename) if candidates else None
-        print(f"using most recent take: {take}" if take else f"no takes under {TAKES}: training without holdout")
+        take = None
     else:
         take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
     if take is not None:
@@ -224,15 +224,19 @@ def main():
     np.random.seed(args.seed)
 
     train_clips = {}
+    holdout_clips = {}
     with tempfile.TemporaryDirectory() as tmp:
         for label, folder in (("positive", "iapapo"), ("negative", "negative")):
             for path in sorted(glob.glob(os.path.join(args.media, folder, "*.m4a"))):
-                name = f"{label}-{os.path.splitext(os.path.basename(path))[0]}"
-                train_clips[name] = load_clip(decode_m4a(path, tmp))
+                stem = os.path.splitext(os.path.basename(path))[0]
+                clip = load_clip(decode_m4a(path, tmp))
+                if label == "negative" and stem.endswith("_2"):
+                    holdout_clips[f"{label}-{stem}"] = clip  # full "Popovers" sentence: held out, never trained on
+                else:
+                    train_clips[f"{label}-{stem}"] = clip
     extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))
     for path in sorted(extra):
         train_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
-    holdout_clips = {}
     for path in sorted(glob.glob(os.path.join(take, "*.wav")) if take else []):
         holdout_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
 

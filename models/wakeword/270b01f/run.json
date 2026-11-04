@@ -1,0 +1,18 @@
+{
+  "version": "0Q6dH7",
+  "args": {
+    "media": "/Users/visakha/dev/iapapo/scripts/../media",
+    "take": null,
+    "holdout": [],
+    "steps": 1500,
+    "batch": 32,
+    "lr": 0.001,
+    "threshold": 0.5,
+    "seed": 0,
+    "extra": "/Users/visakha/dev/iapapo/scripts/../lab/wakeword/extra",
+    "no_extra": false,
+    "out": "/Users/visakha/dev/iapapo/scripts/../lab/wakeword/out/0Q6dH7/no-take-0Q6dH9",
+    "version": "0Q6dH7",
+    "run_id": "0Q6dH9"
+  }
+}

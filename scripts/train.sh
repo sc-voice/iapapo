@@ -20,7 +20,7 @@
 #                    [--holdout <clip> ...] [--steps N]
 #
 #   --take     holdout take, a folder name under lab/wakeword/takes/ or a path containing
-#              a slash (default: most recent take on any device); never trained on
+#              a slash (default: none, agent holdouts only); never trained on
 #   --media    default media/ (positives from media/iapapo, negatives from media/negative)
 #   --holdout  clips to exclude from training, reported as holdout in scores.csv
 #   --out      output root, default lab/wakeword/out
