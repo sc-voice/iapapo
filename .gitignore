@@ -53,3 +53,4 @@ Thumbs.db
 .github/instructions/nx.instructions.md
 .aider*
 .nx/migrate-runs
+__pycache__/
