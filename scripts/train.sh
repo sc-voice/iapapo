@@ -8,7 +8,8 @@
 #   - creates lab/wakeword/{takes,extra,out} if they are missing
 #   - on first run only, creates the virtualenv lab/wakeword/.venv and installs
 #     numpy, scipy, soundfile and torch into it
-#   - trains on one take folder plus optional extra clips, then scores every clip
+#   - trains on media/iapapo (positives) and media/negative (negatives) plus optional
+#     extra clips, then scores every clip, scoring the take clips as holdout
 #   - writes each run to <out>/<version>/<take>-<run id>/ containing wakenet.pt,
 #     scores.csv and run.json
 #       version: first 6 chars of the nf id --file-mod timeId of train.py
@@ -18,8 +19,9 @@
 #   scripts/train.sh [--take <name>] [--out <dir>] [--extra <dir>] [--no-extra]
 #                    [--holdout <clip> ...] [--steps N]
 #
-#   --take     a folder name under lab/wakeword/takes/, or a path containing a slash
-#              (default: most recent take on any device)
+#   --take     holdout take, a folder name under lab/wakeword/takes/ or a path containing
+#              a slash (default: most recent take on any device); never trained on
+#   --media    default media/ (positives from media/iapapo, negatives from media/negative)
 #   --holdout  clips to exclude from training, reported as holdout in scores.csv
 #   --out      output root, default lab/wakeword/out
 #   --extra    default lab/wakeword/extra

@@ -1,9 +1,10 @@
-"""Train a small CNN wake-word recognizer on the lab take.
+"""Train a small CNN wake-word recognizer on media/ clips and score an iPad take as holdout.
 
-Positives are the trimmed wake-word clips, placed at random offsets inside a
-window whose length comes from the trimmed positive duration. Negatives are
-random crops of the negative clips. Every training sample is augmented with a
-random gain and background noise.
+Positives come from media/iapapo and negatives from media/negative (m4a). Positives are
+the trimmed wake-word clips, placed at random offsets inside a window whose length comes
+from the trimmed positive duration. Negatives are random crops of the negative clips.
+Every training sample is augmented with a random gain and background noise. Clips in
+--take are scored only, never trained on.
 
 Run it through scripts/train.sh, which sets up the environment first.
 """
@@ -15,7 +16,9 @@ import json
 import os
 import random
 import re
+import subprocess
 import sys
+import tempfile
 
 import numpy as np
 import time
@@ -29,6 +32,7 @@ from audiomentations import AddBackgroundNoise, AddGaussianSNR, Compose, Gain, T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_EXTRA = os.path.join(HERE, "..", "lab", "wakeword", "extra")
+DEFAULT_MEDIA = os.path.join(HERE, "..", "media")
 DEFAULT_OUT = os.path.join(HERE, "..", "lab", "wakeword", "out")
 TAKES = os.path.join(HERE, "..", "lab", "wakeword", "takes")
 SR = 16000
@@ -58,12 +62,18 @@ class Tee:
 
 
 def load_clip(path):
-    """Read a WAV, resample 48 kHz -> 16 kHz, return float32 mono array."""
+    """Read a WAV at any sample rate, resample to 16 kHz, return float32 mono array."""
     x, sr = sf.read(path, dtype="float32")
     if x.ndim > 1:
         x = x.mean(axis=1)
-    assert sr == 48000, f"{path}: expected 48 kHz, got {sr}"
     return resample_poly(x, SR, sr).astype(np.float32)
+
+
+def decode_m4a(path, tmp):
+    """Decode an m4a to a 16-bit WAV in tmp with macOS afconvert (soundfile cannot read AAC). Returns the WAV path."""
+    out = os.path.join(tmp, os.path.splitext(os.path.basename(path))[0] + ".wav")
+    subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16", path, out], check=True)
+    return out
 
 
 def trim_speech(x, pad_s=0.1, rel_db=-20.0):
@@ -174,8 +184,10 @@ def sliding_scores(model, clip, window_len):
 def main():
     ap = argparse.ArgumentParser(
         description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt, scores.csv and run.json to a run folder under --out.")
+    ap.add_argument("--media", default=DEFAULT_MEDIA,
+                    help="folder with iapapo/ (positives) and negative/ (negatives) m4a clips, used for training (default: media)")
     ap.add_argument("--take", default=None,
-                    help="take folder with positive-*.wav and negative-*.wav; a bare name is looked up in lab/wakeword/takes/ (default: most recent take on any device)")
+                    help="iPad take folder of positive-*.wav and negative-*.wav, scored as holdout and never trained on; a bare name is looked up in lab/wakeword/takes/ (default: most recent take)")
     ap.add_argument("--holdout", nargs="*", default=[],
                     help="clip names to exclude from training; they are scored and reported as holdout")
     ap.add_argument("--steps", type=int, default=1500, help="training steps, one random batch each (default 1500)")
@@ -191,17 +203,17 @@ def main():
     args = ap.parse_args()
     if args.take is None:
         candidates = [d for d in glob.glob(os.path.join(TAKES, "*", "*")) if os.path.isdir(d)]
-        if not candidates:
-            raise SystemExit(f"no takes found under {TAKES}")
-        take = max(candidates, key=os.path.basename)
-        print(f"using most recent take: {take}")
+        take = max(candidates, key=os.path.basename) if candidates else None
+        print(f"using most recent take: {take}" if take else f"no takes under {TAKES}: training without holdout")
     else:
         take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
-    take = os.path.abspath(take)
+    if take is not None:
+        take = os.path.abspath(take)
+        if not os.path.isdir(take):
+            raise SystemExit(f"take directory not found: {take}")
     args.take = take
-    if not os.path.isdir(take):
-        raise SystemExit(f"take directory not found: {take}")
-    args.out = os.path.join(args.out, args.version, f"{os.path.basename(take)}-{args.run_id}")
+    run_name = os.path.basename(take) if take else "no-take"
+    args.out = os.path.join(args.out, args.version, f"{run_name}-{args.run_id}")
     os.makedirs(args.out, exist_ok=False)
     TTY = sys.stdout.isatty()
     sys.stdout = Tee(sys.stdout, open(os.path.join(args.out, "run.log"), "w"))
@@ -211,16 +223,22 @@ def main():
     random.seed(args.seed)  # audiomentations draws from the global random and numpy generators
     np.random.seed(args.seed)
 
-    clips = {}
+    train_clips = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for label, folder in (("positive", "iapapo"), ("negative", "negative")):
+            for path in sorted(glob.glob(os.path.join(args.media, folder, "*.m4a"))):
+                name = f"{label}-{os.path.splitext(os.path.basename(path))[0]}"
+                train_clips[name] = load_clip(decode_m4a(path, tmp))
     extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))
-    paths = sorted(glob.glob(os.path.join(take, "*.wav")) + extra)
-    for path in paths:
-        name = os.path.splitext(os.path.basename(path))[0]
-        clips[name] = load_clip(path)
+    for path in sorted(extra):
+        train_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
+    holdout_clips = {}
+    for path in sorted(glob.glob(os.path.join(take, "*.wav")) if take else []):
+        holdout_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
 
-    trimmed_pos = {n: trim_speech(x) for n, x in clips.items() if n.startswith("positive")}
+    trimmed_pos = {n: trim_speech(x) for n, x in train_clips.items() if n.startswith("positive")}
     if not trimmed_pos:
-        raise SystemExit(f"no positive-*.wav clips found in {take} ({len(clips)} clips loaded)")
+        raise SystemExit(f"no positive clips found in {args.media}/iapapo ({len(train_clips)} training clips loaded)")
     pos_durs = [len(x) / SR for x in trimmed_pos.values()]
     window_s = float(max(pos_durs))  # longest positive, so every wake word fits whole in a window
     window_len = int(window_s * SR)
@@ -228,13 +246,13 @@ def main():
     print(f"window length: {window_s:.3f} s (longest trimmed positive)")
 
     train_pos = [x for n, x in trimmed_pos.items() if n not in args.holdout]
-    train_neg = [trim_speech(x) for n, x in clips.items()
+    train_neg = [trim_speech(x) for n, x in train_clips.items()
                  if n.startswith("negative") and n not in args.holdout]
     if not train_pos or not train_neg:
         raise SystemExit("nothing to train on after --holdout")
     if args.holdout:
         print(f"holdout (not trained on): {args.holdout}")
-    else:
+    if not holdout_clips and not args.holdout:
         print("WARNING: no holdout. Scores below are on training data, not evaluation.")
 
     neg_lens = np.array([len(x) for x in train_neg], dtype=float)
@@ -290,11 +308,11 @@ def main():
 
     rows = []
     trig = {"positive": [0, 0], "negative": [0, 0]}
-    for name, x in clips.items():
+    for name, x in {**train_clips, **holdout_clips}.items():
         label = "positive" if name.startswith("positive") else "negative"
-        role = "holdout" if name in args.holdout else "train"
+        role = "holdout" if name in args.holdout or name in holdout_clips else "train"
         if label == "positive":
-            x = trimmed_pos[name]
+            x = trim_speech(x)
         starts, probs = sliding_scores(model, x, window_len)
         for t, p in zip(starts, probs):
             rows.append([name, label, role, round(float(t), 3), round(float(p), 4)])
