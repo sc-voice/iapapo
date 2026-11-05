@@ -1,0 +1,10 @@
+{
+  "forma": "Task",
+  "id": "0Q6hhx3d00A4C2_opI127W",
+  "name": "Analyse CNN wakeword graph",
+  "summary": "Analyse the CNN wakeword graph to understand its structure and dependencies.",
+  "updateId": "0Q6hhx3d00A4C2_opI127W",
+  "collection": "task",
+  "rawActions": [],
+  "rawReferences": []
+}

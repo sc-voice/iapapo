@@ -9,6 +9,8 @@ help:
 	@echo "  make build-core   Build VACore package"
 	@echo "  make test-core    Run VACore tests"
 	@echo "  make test-py      Run Core ML parity test on a wake-word run (RUN=<run folder>)"
+	@echo "  make wake-sample  Generate wake-word samples for every agent voice (scripts/sample_agents.sh)"
+	@echo "  make wake-base    Train the base wake-word CNN and write a run folder (scripts/train.sh)"
 	@echo "  make build-app    Build VA app for iOS Simulator"
 	@echo "  make test-all     Run VACore, VA app and Core ML parity tests"
 	@echo "  make test-app     Run VA app tests"
@@ -33,6 +35,13 @@ test-py:
 	lab/wakeword/.venv-export/bin/python scripts/test_coreml_parity.py $(RUN)
 
 test-all: test-core test-app test-py
+
+wake-sample:
+	scripts/sample_agents.sh
+
+wake-base:
+	scripts/train.sh
+	say -v "Voice 1" "Trained wakeword base model"
 
 test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test

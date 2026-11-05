@@ -23,9 +23,10 @@ IAPAPO4="$PHONEME."
 NEGATIVE1="We are testing the microphone"
 NEGATIVE2="I love Iowa Popovers. Do you have a recipe?"
 NEGATIVE3="I am really worried about the weather tomorrow. What's the forecast?"
-HARD_NEG4="Iowa Popovers"
-HARD_NEG5"Tomorrow"
+HARD_NEG4="Iowa Papa"
+HARD_NEG5="Tomorrow"
 HARD_NEG6="I am really"
+HARD_NEG7="I a peeppee"
 
 # Returns 0 when two m4a files decode to identical PCM audio.
 same_audio() {
@@ -47,30 +48,39 @@ normalize() {
   ffmpeg -hide_banner -loglevel error -y -i "$1" -map_metadata -1 -fflags +bitexact -c copy -metadata creation_time= -movflags +faststart "$tmp" && mv "$tmp" "$1"
 }
 
-say -v "$VOICE" "$IAPAPO1" 
-say -v "$VOICE" -o media/iapapo/${FILE}__.m4a --file-format=m4af --data-format=aac "$IAPAPO1"
-say -v "$VOICE" "$IAPAPO2" 
-say -v "$VOICE" -o media/iapapo/${FILE}_x.m4a --file-format=m4af --data-format=aac "$IAPAPO2"
+FMT="--file-format=m4af --data-format=aac" 
+
+say -v "$VOICE" -o media/iapapo/${FILE}__.m4a $FMT "$IAPAPO1"
+say -v "$VOICE" -o media/iapapo/${FILE}_x.m4a $FMT "$IAPAPO2"
 if same_audio "media/iapapo/${FILE}__.m4a" "media/iapapo/${FILE}_x.m4a"; then
   rm media/iapapo/${FILE}_x.m4a 
 fi
-say -v "$VOICE" "$IAPAPO3" 
-say -v "$VOICE" -o media/iapapo/${FILE}_q.m4a --file-format=m4af --data-format=aac "$IAPAPO3"
+say -v "$VOICE" -o media/iapapo/${FILE}_q.m4a $FMT "$IAPAPO3"
 if same_audio "media/iapapo/${FILE}__.m4a" "media/iapapo/${FILE}_q.m4a"; then
   rm media/iapapo/${FILE}_q.m4a 
 fi
-say -v "$VOICE" "$IAPAPO4" 
-say -v "$VOICE" -o media/iapapo/${FILE}_p.m4a --file-format=m4af --data-format=aac "$IAPAPO4"
+say -v "$VOICE" -o media/iapapo/${FILE}_p.m4a $FMT "$IAPAPO4"
 if same_audio "media/iapapo/${FILE}__.m4a" "media/iapapo/${FILE}_p.m4a"; then
   rm media/iapapo/${FILE}_p.m4a 
 fi
 
-say -v "$VOICE" -o media/negative/${FILE}_1.m4a --file-format=m4af --data-format=aac "$NEGATIVE1"
-say -v "$VOICE" -o media/negative/${FILE}_2.m4a --file-format=m4af --data-format=aac "$NEGATIVE2"
-say -v "$VOICE" -o media/negative/${FILE}_3.m4a --file-format=m4af --data-format=aac "$NEGATIVE3"
-say -v "$VOICE" -o media/negative/${FILE}_4.m4a --file-format=m4af --data-format=aac "$HARD_NEG4"
-say -v "$VOICE" -o media/negative/${FILE}_5.m4a --file-format=m4af --data-format=aac "$HARD_NEG5"
-say -v "$VOICE" -o media/negative/${FILE}_6.m4a --file-format=m4af --data-format=aac "$HARD_NEG6"
+say -v "$VOICE" "$FILE $PHONEME"
+say -v "$VOICE" -o media/negative/${FILE}_1.m4a $FMT "$NEGATIVE1"
+say -v "$VOICE" -o media/negative/${FILE}_2.m4a $FMT "$NEGATIVE2"
+say -v "$VOICE" -o media/negative/${FILE}_3.m4a $FMT "$NEGATIVE3"
+
+say -v "$VOICE" "${HARD_NEG4}"
+say -v "$VOICE" -o media/negative/${FILE}_4.m4a $FMT "${HARD_NEG4}"
+say -v "$VOICE" -o media/negative/${FILE}_4q.m4a $FMT "${HARD_NEG4}?"
+say -v "$VOICE" "${HARD_NEG5}"
+say -v "$VOICE" -o media/negative/${FILE}_5.m4a $FMT "${HARD_NEG5}"
+say -v "$VOICE" -o media/negative/${FILE}_5q.m4a $FMT "${HARD_NEG5}?"
+say -v "$VOICE" "${HARD_NEG6}"
+say -v "$VOICE" -o media/negative/${FILE}_6.m4a $FMT "${HARD_NEG6}"
+say -v "$VOICE" -o media/negative/${FILE}_6q.m4a $FMT "${HARD_NEG6}?"
+say -v "$VOICE" "${HARD_NEG7}"
+say -v "$VOICE" -o media/negative/${FILE}_7.m4a $FMT "${HARD_NEG7}"
+say -v "$VOICE" -o media/negative/${FILE}_7q.m4a $FMT "${HARD_NEG7}?"
 
 for f in media/iapapo/${FILE}*.m4a media/negative/${FILE}_*.m4a; do
   [ -e "$f" ] && normalize "$f"
