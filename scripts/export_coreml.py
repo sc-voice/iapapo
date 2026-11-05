@@ -36,12 +36,16 @@ class ExportNet(nn.Module):
 
     def __init__(self, wakenet):
         super().__init__()
-        self.net = wakenet.net
+        self.conv = wakenet.conv
+        self.gru = wakenet.gru
+        self.head = wakenet.head
 
     def forward(self, feats):
         feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
             feats.std(dim=(2, 3), keepdim=True) + 1e-5)
-        return torch.sigmoid(self.net(feats).squeeze(1))
+        x = self.conv(feats).squeeze(2).permute(0, 2, 1)  # [batch, 8, 32]
+        _, h = self.gru(x)
+        return torch.sigmoid(self.head(h[-1]).squeeze(1))
 
 
 def take_window_len(take):

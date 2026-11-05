@@ -125,22 +125,28 @@ def log_mel(wave):
 
 
 class WakeNet(nn.Module):
-    """Three conv blocks over log-mel, global pooling, one logit."""
+    """Three conv blocks over log-mel, pooled to 9 time steps, a GRU over those steps, one logit."""
 
     def __init__(self):
         super().__init__()
-        self.net = nn.Sequential(
+        self.conv = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Dropout(0.3), nn.Linear(32, 1),
+            nn.AdaptiveAvgPool2d((1, 9)),
         )
+        self.gru = nn.GRU(input_size=32, hidden_size=64, batch_first=True)
+        self.drop = nn.Dropout(0.3)
+        self.head = nn.Linear(64, 1)
 
     def forward(self, wave):
         feats = log_mel(wave)
         feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
             feats.std(dim=(2, 3), keepdim=True) + 1e-5)
-        return self.net(feats).squeeze(1)
+        x = self.conv(feats)                 # [batch, 32, 1, 8]
+        x = x.squeeze(2).permute(0, 2, 1)    # [batch, 8, 32]
+        _, h = self.gru(x)                   # h: [1, batch, 64], final hidden state
+        return self.head(self.drop(h[-1])).squeeze(1)
 
 
 def place_in_window(clip, window_len, rng):
@@ -230,8 +236,8 @@ def main():
             for path in sorted(glob.glob(os.path.join(args.media, folder, "*.m4a"))):
                 stem = os.path.splitext(os.path.basename(path))[0]
                 clip = load_clip(decode_m4a(path, tmp))
-                if label == "negative" and stem.endswith("_2"):
-                    holdout_clips[f"{label}-{stem}"] = clip  # full "Popovers" sentence: held out, never trained on
+                if label == "negative" and stem.endswith(("_2", "_3")):
+                    holdout_clips[f"{label}-{stem}"] = clip  # full "Popovers" (_2) and weather (_3) sentences: held out, never trained on
                 else:
                     train_clips[f"{label}-{stem}"] = clip
     extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))

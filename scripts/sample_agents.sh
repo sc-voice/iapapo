@@ -44,4 +44,8 @@ Tara (English (India))|Tara
 Voice 1|Voice_1_en_US
 EOF
 
-rm media/iapapo/Isha_premium__.m4a
+rm media/iapapo/Isha*.m4a
+rm media/iapapo/Fiona*.m4a
+rm media/iapapo/Sangeeta*.m4a
+rm media/iapapo/Tara*.m4a
+rm media/iapapo/Joelle*.m4a

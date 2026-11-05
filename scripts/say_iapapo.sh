@@ -23,7 +23,9 @@ IAPAPO4="$PHONEME."
 NEGATIVE1="We are testing the microphone"
 NEGATIVE2="I love Iowa Popovers. Do you have a recipe?"
 NEGATIVE3="I am really worried about the weather tomorrow. What's the forecast?"
-NEGATIVE4="Iowa Popovers"
+HARD_NEG4="Iowa Popovers"
+HARD_NEG5"Tomorrow"
+HARD_NEG6="I am really"
 
 # Returns 0 when two m4a files decode to identical PCM audio.
 same_audio() {
@@ -66,7 +68,9 @@ fi
 say -v "$VOICE" -o media/negative/${FILE}_1.m4a --file-format=m4af --data-format=aac "$NEGATIVE1"
 say -v "$VOICE" -o media/negative/${FILE}_2.m4a --file-format=m4af --data-format=aac "$NEGATIVE2"
 say -v "$VOICE" -o media/negative/${FILE}_3.m4a --file-format=m4af --data-format=aac "$NEGATIVE3"
-say -v "$VOICE" -o media/negative/${FILE}_4.m4a --file-format=m4af --data-format=aac "$NEGATIVE4"
+say -v "$VOICE" -o media/negative/${FILE}_4.m4a --file-format=m4af --data-format=aac "$HARD_NEG4"
+say -v "$VOICE" -o media/negative/${FILE}_5.m4a --file-format=m4af --data-format=aac "$HARD_NEG5"
+say -v "$VOICE" -o media/negative/${FILE}_6.m4a --file-format=m4af --data-format=aac "$HARD_NEG6"
 
 for f in media/iapapo/${FILE}*.m4a media/negative/${FILE}_*.m4a; do
   [ -e "$f" ] && normalize "$f"

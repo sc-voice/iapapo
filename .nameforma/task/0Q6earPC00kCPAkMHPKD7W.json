@@ -1,0 +1,10 @@
+{
+  "forma": "Task",
+  "id": "0Q6earPC00kCPAkMHPKD7W",
+  "name": "CNN Wakeword Analysis",
+  "summary": "Analyze current CNN architecture for wakeword recognition suitability, specifically addressing the inability to sense rhythmic differences.",
+  "updateId": "0Q6earPC00kCPAkMHPKD7W",
+  "collection": "task",
+  "rawActions": [],
+  "rawReferences": []
+}
