@@ -12,6 +12,8 @@ Run it through scripts/train.sh, which sets up the environment first.
 import argparse
 import csv
 import glob
+import inspect
+import hashlib
 import json
 import os
 import random
@@ -117,6 +119,51 @@ MEL = mel_filterbank(N_FFT, N_MELS, SR)
 WINDOW = torch.hann_window(N_FFT)
 
 
+def git_blob_id(path):
+    """Git's blob ID for a file: SHA-1 over "blob <size>\\0" plus the bytes, the same value as `git hash-object <file>`."""
+    with open(path, "rb") as f:
+        data = f.read()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def repo_relative(path):
+    """Path relative to the repo root, so run.json reads the same on any machine."""
+    return os.path.relpath(os.path.abspath(path), os.path.join(HERE, ".."))
+
+
+def add_input(inputs, holdout_paths, path, label, holdout=False):
+    """Record one clip file for run.json: under input-positives or input-negatives by label, and in holdout_paths if held out."""
+    key = "input-positives" if label == "positive" else "input-negatives"
+    rel = repo_relative(path)
+    inputs[key][rel] = git_blob_id(path)
+    if holdout:
+        holdout_paths.append(rel)
+
+
+def frontend_id():
+    """Hash of the front end: the source of mel_filterbank and log_mel, the audio constants, and the window type.
+    It changes only when the features the model sees change. The Swift port records the same id."""
+    source = [line for f in (mel_filterbank, log_mel) for line in inspect.getsource(f).splitlines()]
+    constants = {"SR": SR, "N_MELS": N_MELS, "FRAME_S": FRAME_S, "HOP_S": HOP_S,
+                 "N_FFT": N_FFT, "HOP": HOP, "window": "torch.hann_window(N_FFT), periodic"}
+    return hashlib.sha1(json.dumps({"source": source, "constants": constants}, sort_keys=True).encode()).hexdigest()
+
+
+def model_description(model):
+    """run.json entry for the network: class, layer tree from repr, parameter count, each stored tensor's shape,
+    the source of the forward computation (front end, score_features, forward) and the audio constants it uses."""
+    graph = {"class": type(model).__name__,
+             "layers": str(model).splitlines(), "tensor_shapes": {k: list(v.shape) for k, v in model.state_dict().items()},
+             "forward_source": [line for f in (log_mel, WakeNet.score_features, WakeNet.forward)
+                                for line in inspect.getsource(f).splitlines()],
+             "constants": {"SR": SR, "N_MELS": N_MELS, "FRAME_S": FRAME_S, "HOP_S": HOP_S,
+                           "N_FFT": N_FFT, "HOP": HOP, "HOP_WINDOW_S": HOP_WINDOW_S}}
+    # graph_id covers only the graph above: same architecture and front end give the same id, whatever the weights, data or settings.
+    graph_id = hashlib.sha1(json.dumps(graph, sort_keys=True).encode()).hexdigest()
+    return {"graph_id": graph_id, "frontend_id": frontend_id(),
+            "params": sum(p.numel() for p in model.parameters()), **graph}
+
+
 def log_mel(wave):
     """(batch, samples) -> (batch, 1, N_MELS, frames) log-mel features."""
     spec = torch.stft(wave, N_FFT, HOP, window=WINDOW, return_complex=True).abs() ** 2
@@ -139,8 +186,8 @@ class WakeNet(nn.Module):
         self.drop = nn.Dropout(0.3)
         self.head = nn.Linear(128, 1)
 
-    def forward(self, wave):
-        feats = log_mel(wave)
+    def score_features(self, feats):
+        """(batch, 1, N_MELS, frames) log-mel -> (batch,) wake-word logits. Shared by training, scoring and Core ML export."""
         feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
             feats.std(dim=(2, 3), keepdim=True) + 1e-5)
         x = self.conv(feats)                             # [batch, 32, 10, 22]
@@ -148,6 +195,10 @@ class WakeNet(nn.Module):
         out, _ = self.gru(x)                             # [batch, 22, 128]
         logits = self.head(self.drop(out)).squeeze(-1)   # [batch, 22]
         return logits.max(dim=1).values                  # strongest step per window
+
+    def forward(self, wave):
+        """(batch, samples) audio -> (batch,) wake-word logits."""
+        return self.score_features(log_mel(wave))
 
 
 def place_in_window(clip, window_len, rng):
@@ -168,7 +219,7 @@ _AUGMENTS = [
     Gain(min_gain_db=-6, max_gain_db=6, p=1.0),
     AddGaussianSNR(min_snr_db=10, max_snr_db=30, p=1.0),
 ]
-def build_augment(noise_snr=(20.0, 30.0)):
+def build_augment(noise_snr=(3.0, 30.0)):
     """Return the training augmentation chain. Background noise from NOISE_DIR is added at noise_snr (min, max) dB, p=0.5, only when that folder has WAVs."""
     augments = list(_AUGMENTS)
     if glob.glob(os.path.join(NOISE_DIR, "*.wav")):
@@ -200,7 +251,9 @@ def main():
     ap = argparse.ArgumentParser(
         description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt, scores.csv and run.json to a run folder under --out.")
     ap.add_argument("--media", default=DEFAULT_MEDIA,
-                    help="folder with iapapo/ (positives) and negative/ (negatives) m4a clips, used for training (default: media)")
+                    help="folder with <wakeword>/ (positives) and negative/ (negatives) m4a clips, used for training (default: media)")
+    ap.add_argument("--wakeword", default="iapapo",
+                    help="wake word the model detects: its positive clips are read from <media>/<wakeword>/ and it is recorded in run.json (default: iapapo)")
     ap.add_argument("--take", default=None,
                     help="iPad take folder of positive-*.wav and negative-*.wav, scored as holdout and never trained on; a bare name is looked up in lab/wakeword/takes/ (default: none, agent holdouts only)")
     ap.add_argument("--holdout", nargs="*", default=[],
@@ -210,8 +263,8 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3, help="Adam starting learning rate, cosine-decayed to zero over --steps (default 1e-3)")
     ap.add_argument("--threshold", type=float, default=0.5, help="probability at which a clip counts as triggered (default 0.5)")
     ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs, 0 to 4294967295 (default 0)")
-    ap.add_argument("--noise-snr", type=float, nargs=2, metavar=("MIN", "MAX"), default=[20.0, 30.0],
-                    help="SNR range in dB for background noise when lab/wakeword/noise has WAVs (default 20 30)")
+    ap.add_argument("--noise-snr", type=float, nargs=2, metavar=("MIN", "MAX"), default=[3.0, 30.0],
+                    help="SNR range in dB for background noise when lab/wakeword/noise has WAVs (default 3 30)")
     ap.add_argument("--window-scale", type=float, default=1.0,
                     help="training and scoring window as a multiple of the longest trimmed positive (default 1.0)")
     ap.add_argument("--extra", default=DEFAULT_EXTRA, help="extra clips added to training (default: lab/wakeword/extra)")
@@ -244,20 +297,28 @@ def main():
 
     train_clips = {}
     holdout_clips = {}
+    inputs = {"input-positives": {}, "input-negatives": {}}  # every clip file that reaches the weights, with its hash, for run.json
+    holdout_paths = []
     with tempfile.TemporaryDirectory() as tmp:
-        for label, folder in (("positive", "iapapo"), ("negative", "negative")):
+        for label, folder in (("positive", args.wakeword), ("negative", "negative")):
             for path in sorted(glob.glob(os.path.join(args.media, folder, "*.m4a"))):
                 stem = os.path.splitext(os.path.basename(path))[0]
                 clip = load_clip(decode_m4a(path, tmp))
                 if label == "negative" and stem.endswith(("_1", "_2", "_3")):
                     holdout_clips[f"{label}-{stem}"] = clip  # microphone (_1), full "Popovers" (_2) and weather (_3) sentences: held out, never trained on
+                    add_input(inputs, holdout_paths, path, label, holdout=True)
                 else:
                     train_clips[f"{label}-{stem}"] = clip
+                    add_input(inputs, holdout_paths, path, label)
     extra = [] if args.no_extra else glob.glob(os.path.join(args.extra, "*.wav"))
     for path in sorted(extra):
-        train_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
+        name = os.path.splitext(os.path.basename(path))[0]
+        train_clips[name] = load_clip(path)
+        add_input(inputs, holdout_paths, path, "positive" if name.startswith("positive") else "negative")
     for path in sorted(glob.glob(os.path.join(take, "*.wav")) if take else []):
-        holdout_clips[os.path.splitext(os.path.basename(path))[0]] = load_clip(path)
+        name = os.path.splitext(os.path.basename(path))[0]
+        holdout_clips[name] = load_clip(path)
+        add_input(inputs, holdout_paths, path, "positive" if name.startswith("positive") else "negative", holdout=True)
 
     trimmed_pos = {n: trim_speech(x) for n, x in train_clips.items() if n.startswith("positive")}
     if not trimmed_pos:
@@ -349,8 +410,21 @@ def main():
         w.writerow(["clip", "label", "role", "start_s", "prob"])
         w.writerows(rows)
 
+    from importlib.metadata import PackageNotFoundError, version as pkg_version
+    try:
+        coremltools_version = pkg_version("coremltools")
+    except PackageNotFoundError:
+        coremltools_version = None
+    env = {"python": sys.version.split()[0], "torch": torch.__version__, "numpy": np.__version__,
+           "coremltools": coremltools_version}
+    # Every WAV in NOISE_DIR is a candidate for background noise, so record all of them with a hash.
+    noise = {os.path.basename(p): git_blob_id(p) for p in sorted(glob.glob(os.path.join(NOISE_DIR, "*.wav")))}
+    run_args = {k: (repo_relative(v) if k in ("media", "extra", "out", "take") and v else v)
+                for k, v in vars(args).items()}
     with open(os.path.join(args.out, "run.json"), "w") as f:
-        json.dump({"version": args.version, "args": vars(args)}, f, indent=2)
+        json.dump({"version": args.version, "wakeword": args.wakeword, "env": env, "train_py_blob": git_blob_id(__file__),
+                   "model": model_description(model), "window_len": window_len, "inputs": inputs,
+                   "holdout": holdout_paths, "noise": noise, "args": run_args}, f, indent=2)
 
     print(f"\nclips triggered at p>={args.threshold}:")
     print(f"  positives {trig['positive'][0]}/{trig['positive'][1]}")

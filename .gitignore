@@ -55,3 +55,6 @@ Thumbs.db
 .aider*
 .nx/migrate-runs
 __pycache__/
+
+# Single Python environment at the repo root (managed by uv from pyproject.toml and uv.lock).
+.venv/

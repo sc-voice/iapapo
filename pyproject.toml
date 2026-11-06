@@ -1,0 +1,18 @@
+# Python environment for the wake-word training, scoring and Core ML export scripts.
+# Direct dependencies are pinned here; uv.lock pins every transitive package. Update with uv, not by hand.
+[project]
+name = "iapapo-wakeword"
+version = "0.1.0"
+description = "Wake-word training, export and parity scripts for IaPapo"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch==2.7.0",         # newest torch coremltools 9.0 lists as tested
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "soundfile==0.14.0",
+    "audiomentations==0.43.1",
+    "coremltools==9.0",
+]
+
+[tool.uv]
+package = false  # scripts only; not an installable package

@@ -6,15 +6,13 @@ Per-clip feature normalization is inside the model, so it matches training.
 Output "prob" is the wake-word probability for one window.
 
 Run it with the export venv, which has coremltools:
-    lab/wakeword/.venv-export/bin/python scripts/export_coreml.py <run folder>
+    .venv/bin/python scripts/export_coreml.py <run folder>
 
 Reads <run folder>/wakenet.pt and run.json. Writes <run folder>/wakenet.mlpackage
-and <run folder>/export.json. The window length comes from the take named in run.json,
-computed the same way train.py does.
+and <run folder>/export.json. The window length is the window_len that train.py recorded in run.json.
 """
 
 import argparse
-import glob
 import json
 import os
 import sys
@@ -32,29 +30,23 @@ OUTPUT_NAME = "prob"
 
 
 class ExportNet(nn.Module):
-    """WakeNet from log-mel input: per-clip normalization, conv net, sigmoid."""
+    """Wraps WakeNet.score_features with the sigmoid, so the exported output is a probability. No logic of its own."""
 
     def __init__(self, wakenet):
         super().__init__()
-        self.conv = wakenet.conv
-        self.gru = wakenet.gru
-        self.head = wakenet.head
+        self.wakenet = wakenet
 
     def forward(self, feats):
-        feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
-            feats.std(dim=(2, 3), keepdim=True) + 1e-5)
-        x = self.conv(feats).squeeze(2).permute(0, 2, 1)  # [batch, 8, 32]
-        _, h = self.gru(x)
-        return torch.sigmoid(self.head(h[-1]).squeeze(1))
+        return torch.sigmoid(self.wakenet.score_features(feats))
 
 
-def take_window_len(take):
-    """Window length in samples: longest trimmed positive, as in train.py."""
-    paths = sorted(glob.glob(os.path.join(take, "positive*.wav")))
-    if not paths:
-        raise SystemExit(f"no positive-*.wav clips in {take}")
-    durs = [len(train.trim_speech(train.load_clip(p))) / train.SR for p in paths]
-    return int(max(durs) * train.SR)
+def window_len_from_run(run_dir):
+    """Window length in samples, as train.py recorded it in run.json."""
+    with open(os.path.join(run_dir, "run.json")) as f:
+        meta = json.load(f)
+    if "window_len" not in meta:
+        raise SystemExit("run.json has no window_len; this run predates the current train.py. Retrain it.")
+    return meta["window_len"]
 
 
 def frames_for(window_len):
@@ -116,9 +108,7 @@ def main():
     ap.add_argument("run_dir", help="run folder containing wakenet.pt and run.json")
     args = ap.parse_args()
     run_dir = os.path.abspath(args.run_dir)
-    with open(os.path.join(run_dir, "run.json")) as f:
-        take = json.load(f)["args"]["take"]
-    window_len = take_window_len(take)
+    window_len = window_len_from_run(run_dir)
     out = export(run_dir, window_len)
     print(f"window length: {window_len} samples ({window_len / train.SR:.3f} s), frames {frames_for(window_len)}")
     print(f"saved: {out}")
