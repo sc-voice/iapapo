@@ -40,8 +40,9 @@ wake-sample:
 	scripts/sample_agents.sh
 
 wake-base:
-	scripts/train.sh
+	scripts/train.sh $(ARGS)
 	say -v "Voice 1" "Trained wakeword base model"
+	scripts/train-summary.py
 
 test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test

@@ -1,0 +1,20 @@
+[
+  {
+    "file": "651259__ampi_sound__ext_cafe_kahvilakumpu_walla_park.wav",
+    "title": "ext_cafe_kahvilakumpu_walla_park",
+    "creator": "ampi_sound",
+    "source": "https://freesound.org/s/651259/",
+    "license": "CC BY-NC 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
+    "changes": "Source only. Cut 15-20 s chunk used as training noise (see 651259-cafe-05.wav)."
+  },
+  {
+    "file": "651259-cafe-05.wav",
+    "title": "ext_cafe_kahvilakumpu_walla_park (chunk 15-20 s)",
+    "creator": "ampi_sound",
+    "source": "https://freesound.org/s/651259/",
+    "license": "CC BY-NC 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
+    "changes": "Cut to 5 s (15-20 s of the source) and converted to mono 16 kHz for training noise."
+  }
+]

@@ -28,6 +28,11 @@ HARD_NEG5="Tomorrow"
 HARD_NEG6="I am really"
 HARD_NEG7="I a peeppee"
 
+
+NEG_SENT1="Whenever you find yourself on the side of the majority, it is time to pause and reflect."
+NEG_SENT2="Age is an issue of mind over matter. If you don't mind, it doesn't matter."
+NEG_SENT3="Clothes make the man. Appearances are deceptive, and not all that glitters is gold."
+
 # Returns 0 when two m4a files decode to identical PCM audio.
 same_audio() {
   local tmp status
@@ -81,6 +86,9 @@ say -v "$VOICE" -o media/negative/${FILE}_6q.m4a $FMT "${HARD_NEG6}?"
 say -v "$VOICE" "${HARD_NEG7}"
 say -v "$VOICE" -o media/negative/${FILE}_7.m4a $FMT "${HARD_NEG7}"
 say -v "$VOICE" -o media/negative/${FILE}_7q.m4a $FMT "${HARD_NEG7}?"
+say -v "$VOICE" -o media/negative/${FILE}_s1.m4a $FMT "${NEG_SENT1}"
+say -v "$VOICE" -o media/negative/${FILE}_s2.m4a $FMT "${NEG_SENT2}"
+say -v "$VOICE" -o media/negative/${FILE}_s3.m4a $FMT "${NEG_SENT3}"
 
 for f in media/iapapo/${FILE}*.m4a media/negative/${FILE}_*.m4a; do
   [ -e "$f" ] && normalize "$f"

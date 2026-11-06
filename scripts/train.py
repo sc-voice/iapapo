@@ -125,7 +125,7 @@ def log_mel(wave):
 
 
 class WakeNet(nn.Module):
-    """Three conv blocks over log-mel, pooled to 22 time steps, a GRU over those steps, one logit."""
+    """Three conv blocks over log-mel with frequency kept as channel features, a GRU over 22 time steps, and a per-step logit max-pooled over time."""
 
     def __init__(self):
         super().__init__()
@@ -133,9 +133,9 @@ class WakeNet(nn.Module):
             nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
             nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 22)),
+            nn.AdaptiveAvgPool2d((10, 22)),
         )
-        self.gru = nn.GRU(input_size=32, hidden_size=128, batch_first=True)
+        self.gru = nn.GRU(input_size=320, hidden_size=128, batch_first=True)
         self.drop = nn.Dropout(0.3)
         self.head = nn.Linear(128, 1)
 
@@ -143,10 +143,11 @@ class WakeNet(nn.Module):
         feats = log_mel(wave)
         feats = (feats - feats.mean(dim=(2, 3), keepdim=True)) / (
             feats.std(dim=(2, 3), keepdim=True) + 1e-5)
-        x = self.conv(feats)                 # [batch, 32, 1, 22]
-        x = x.squeeze(2).permute(0, 2, 1)    # [batch, 8, 32]
-        _, h = self.gru(x)                   # h: [1, batch, 64], final hidden state
-        return self.head(self.drop(h[-1])).squeeze(1)
+        x = self.conv(feats)                             # [batch, 32, 10, 22]
+        x = x.flatten(1, 2).permute(0, 2, 1)             # [batch, 22, 320]: spectral shape kept per step
+        out, _ = self.gru(x)                             # [batch, 22, 128]
+        logits = self.head(self.drop(out)).squeeze(-1)   # [batch, 22]
+        return logits.max(dim=1).values                  # strongest step per window
 
 
 def place_in_window(clip, window_len, rng):
@@ -167,9 +168,15 @@ _AUGMENTS = [
     Gain(min_gain_db=-6, max_gain_db=6, p=1.0),
     AddGaussianSNR(min_snr_db=10, max_snr_db=30, p=1.0),
 ]
-if glob.glob(os.path.join(NOISE_DIR, "*.wav")):
-    _AUGMENTS.append(AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=3, max_snr_db=30, p=0.5))
-AUGMENT = Compose(_AUGMENTS)
+def build_augment(noise_snr=(20.0, 30.0)):
+    """Return the training augmentation chain. Background noise from NOISE_DIR is added at noise_snr (min, max) dB, p=0.5, only when that folder has WAVs."""
+    augments = list(_AUGMENTS)
+    if glob.glob(os.path.join(NOISE_DIR, "*.wav")):
+        augments.append(AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=noise_snr[0], max_snr_db=noise_snr[1], p=0.5))
+    return Compose(augments)
+
+
+AUGMENT = build_augment()
 
 
 def augment(x):
@@ -202,13 +209,19 @@ def main():
     ap.add_argument("--batch", type=int, default=32, help="samples per step (default 32)")
     ap.add_argument("--lr", type=float, default=1e-3, help="Adam starting learning rate, cosine-decayed to zero over --steps (default 1e-3)")
     ap.add_argument("--threshold", type=float, default=0.5, help="probability at which a clip counts as triggered (default 0.5)")
-    ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs (default 0)")
+    ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs, 0 to 4294967295 (default 0)")
+    ap.add_argument("--noise-snr", type=float, nargs=2, metavar=("MIN", "MAX"), default=[20.0, 30.0],
+                    help="SNR range in dB for background noise when lab/wakeword/noise has WAVs (default 20 30)")
+    ap.add_argument("--window-scale", type=float, default=1.0,
+                    help="training and scoring window as a multiple of the longest trimmed positive (default 1.0)")
     ap.add_argument("--extra", default=DEFAULT_EXTRA, help="extra clips added to training (default: lab/wakeword/extra)")
     ap.add_argument("--no-extra", action="store_true", help="do not use the extra clips")
     ap.add_argument("--out", default=DEFAULT_OUT, help="output root; run folder is <out>/<version>/<take>-<run-id>/ (default: lab/wakeword/out)")
     ap.add_argument("--version", required=True, help="version of this script, recorded in run.json (set by scripts/train.sh)")
     ap.add_argument("--run-id", required=True, help="run identifier, appended to the run folder name (set by scripts/train.sh)")
     args = ap.parse_args()
+    global AUGMENT
+    AUGMENT = build_augment(tuple(args.noise_snr))
     if args.take is None:
         take = None
     else:
@@ -250,10 +263,10 @@ def main():
     if not trimmed_pos:
         raise SystemExit(f"no positive clips found in {args.media}/iapapo ({len(train_clips)} training clips loaded)")
     pos_durs = [len(x) / SR for x in trimmed_pos.values()]
-    window_s = float(max(pos_durs))  # longest positive, so every wake word fits whole in a window
+    window_s = float(max(pos_durs)) * args.window_scale  # longest positive, scaled; the wake word always fits whole
     window_len = int(window_s * SR)
     print(f"trimmed positives (s): { {n: round(len(x)/SR, 3) for n, x in trimmed_pos.items()} }")
-    print(f"window length: {window_s:.3f} s (longest trimmed positive)")
+    print(f"window length: {window_s:.3f} s (longest trimmed positive x {args.window_scale})")
 
     train_pos = [x for n, x in trimmed_pos.items() if n not in args.holdout]
     train_neg = [trim_speech(x) for n, x in train_clips.items()
