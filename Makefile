@@ -38,6 +38,7 @@ help:
 	@echo "  make clean-core   Clean VACore build artifacts"
 	@echo "  make help         Show this list"
 	@echo "  make install      Check Xcode/macOS versions, build the Python env, resolve Swift packages"
+	@echo "  make export       Core ML export of a wake-word run (RUN=<run folder>)"
 	@echo "  make match        Core ML vs PyTorch match on a wake-word run (RUN=<run folder> TAKE=<take folder>)"
 	@echo "  make report-loc   Print lines of tracked code by area and language"
 	@echo "  make test-all    Run VACore, VA app and wake-word matcher tests"
@@ -59,13 +60,17 @@ install:
 	@$(PY) -c "import sys, torch, coremltools; print('python     ', sys.version.split()[0]); print('torch      ', torch.__version__); print('coremltools', coremltools.__version__)" 2>/dev/null
 	@echo "install: ready"
 
-# Core ML match for one wake-word run on one take. The run folder must already hold wakenet.pt,
-# wakenet.mlpackage (scripts/export_coreml.py) and run.json. Override with RUN=<folder> TAKE=<folder>.
-RUN ?= lab/wakeword/out/0Q6nUb/no-take-0Q6nUm
-TAKE ?= lab/wakeword/takes/turtlePro/20261104-075505
+# Core ML export for one wake-word run: writes wakenet.mlpackage and export.json into the run folder.
+# RUN has no default: pass it, e.g. make export RUN=lab/wakeword/out/<version>/<run>.
+export:
+	@test -n "$(RUN)" || { echo "make export needs RUN=<run folder>"; exit 1; }
+	scripts/export.sh $(RUN)
 
+# Core ML match for one wake-word run on one take. The run folder must already hold wakenet.pt,
+# wakenet.mlpackage (scripts/python/export_coreml.py) and run.json. RUN and TAKE have no default: pass both.
 match:
-	$(PY) scripts/test_coreml_match.py $(RUN) $(TAKE)
+	@test -n "$(RUN)" -a -n "$(TAKE)" || { echo "make match needs RUN=<run folder> TAKE=<take folder>"; exit 1; }
+	$(PY) scripts/python/test_coreml_match.py $(RUN) $(TAKE)
 
 report-loc:
 	scripts/report-loc.sh
@@ -81,7 +86,8 @@ test-core:
 # Wake-word matcher end to end: its unit tests, Core ML vs PyTorch match on one run, and the
 # Swift front end vs Python features. RUN and TAKE are described at match.
 test-wakeword:
-	$(PY) scripts/test_wakeword_matcher.py
+	$(PY) scripts/python/tests/test_wakeword_matcher.py
+	$(PY) scripts/python/tests/test_nfhash.py
 	$(MAKE) match
 	swift test -c release --package-path VACore --filter logMel
 

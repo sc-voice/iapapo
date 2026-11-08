@@ -43,7 +43,8 @@ def main():
     if "window_len" not in meta:
         raise SystemExit("run.json has no window_len; this run predates the current train.py. Retrain to evaluate it.")
     window_len = meta["window_len"]
-    threshold = args.threshold if args.threshold is not None else meta["args"]["threshold"]
+    train_args = meta.get("train_args") or meta["args"]  # "args" is the key in runs trained before the rename
+    threshold = args.threshold if args.threshold is not None else train_args["threshold"]
 
     # Own run ID for this evaluation, from the same nf id source as scripts/train.sh (first 6 characters).
     eval_id = subprocess.run(["nf", "id"], capture_output=True, text=True, check=True).stdout.strip()[:6]
@@ -73,8 +74,7 @@ def main():
     }
     record = {
         "run_id": eval_id,
-        "model_run_id": meta["args"]["run_id"],
-        "graph_id": meta.get("model", {}).get("graph_id"),
+        "model_run_id": train_args["run_id"],
         "model_run": train.repo_relative(run_dir),
         "take": train.repo_relative(take_dir),
         "take_inputs": {train.repo_relative(p): train.git_blob_id(p) for p in take_files},

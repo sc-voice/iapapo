@@ -32,11 +32,15 @@ import torch.nn.functional as F
 from scipy.signal import resample_poly
 from audiomentations import AddBackgroundNoise, AddGaussianSNR, Compose, Gain, TimeStretch
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # scripts/, for nfhash
+from nfhash import nf_hash, nf_hash_file
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EXTRA = os.path.join(HERE, "..", "lab", "wakeword", "extra")
-DEFAULT_MEDIA = os.path.join(HERE, "..", "media")
-DEFAULT_OUT = os.path.join(HERE, "..", "lab", "wakeword", "out")
-TAKES = os.path.join(HERE, "..", "lab", "wakeword", "takes")
+ROOT = os.path.join(HERE, "..", "..")
+DEFAULT_EXTRA = os.path.join(ROOT, "lab", "wakeword", "extra")
+DEFAULT_MEDIA = os.path.join(ROOT, "media")
+DEFAULT_OUT = os.path.join(ROOT, "lab", "wakeword", "out")
+TAKES = os.path.join(ROOT, "lab", "wakeword", "takes")
 SR = 16000
 HOP_S = 0.010
 FRAME_S = 0.025
@@ -128,39 +132,33 @@ def git_blob_id(path):
 
 def repo_relative(path):
     """Path relative to the repo root, so run.json reads the same on any machine."""
-    return os.path.relpath(os.path.abspath(path), os.path.join(HERE, ".."))
+    return os.path.relpath(os.path.abspath(path), ROOT)
 
 
 def add_input(inputs, holdout_paths, path, label, holdout=False):
     """Record one clip file for run.json: under input-positives or input-negatives by label, and in holdout_paths if held out."""
     key = "input-positives" if label == "positive" else "input-negatives"
     rel = repo_relative(path)
-    inputs[key][rel] = git_blob_id(path)
+    inputs[key][rel] = nf_hash_file(path)
     if holdout:
         holdout_paths.append(rel)
 
 
-def frontend_id():
-    """Hash of the front end: the source of mel_filterbank and log_mel, the audio constants, and the window type.
-    It changes only when the features the model sees change. The Swift port records the same id."""
+def frontend_nfhash():
+    """nf hash of the front end: the source of mel_filterbank and log_mel, the audio constants, and the window type.
+    It changes only when the features the model sees change. The Swift port records the same value."""
     source = [line for f in (mel_filterbank, log_mel) for line in inspect.getsource(f).splitlines()]
     constants = {"SR": SR, "N_MELS": N_MELS, "FRAME_S": FRAME_S, "HOP_S": HOP_S,
                  "N_FFT": N_FFT, "HOP": HOP, "window": "torch.hann_window(N_FFT), periodic"}
-    return hashlib.sha1(json.dumps({"source": source, "constants": constants}, sort_keys=True).encode()).hexdigest()
+    return nf_hash(json.dumps({"source": source, "constants": constants}, sort_keys=True).encode())
 
 
 def model_description(model):
-    """run.json entry for the network: class, layer tree from repr, parameter count, each stored tensor's shape,
-    the source of the forward computation (front end, score_features, forward) and the audio constants it uses."""
+    """run.json entry for the network: class, parameter count, and the audio constants it uses."""
     graph = {"class": type(model).__name__,
-             "layers": str(model).splitlines(), "tensor_shapes": {k: list(v.shape) for k, v in model.state_dict().items()},
-             "forward_source": [line for f in (log_mel, WakeNet.score_features, WakeNet.forward)
-                                for line in inspect.getsource(f).splitlines()],
              "constants": {"SR": SR, "N_MELS": N_MELS, "FRAME_S": FRAME_S, "HOP_S": HOP_S,
                            "N_FFT": N_FFT, "HOP": HOP, "HOP_WINDOW_S": HOP_WINDOW_S}}
-    # graph_id covers only the graph above: same architecture and front end give the same id, whatever the weights, data or settings.
-    graph_id = hashlib.sha1(json.dumps(graph, sort_keys=True).encode()).hexdigest()
-    return {"graph_id": graph_id, "frontend_id": frontend_id(),
+    return {"frontend_nfhash": frontend_nfhash(),
             "params": sum(p.numel() for p in model.parameters()), **graph}
 
 
@@ -176,15 +174,25 @@ class WakeNet(nn.Module):
 
     def __init__(self):
         super().__init__()
+        # Every PyTorch default is written out, so a change in PyTorch's defaults cannot change this network.
         self.conv = nn.Sequential(
-            nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True, padding_mode="zeros"),
+            nn.BatchNorm2d(16, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(inplace=False),
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True, padding_mode="zeros"),
+            nn.BatchNorm2d(32, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(inplace=False),
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, bias=True, padding_mode="zeros"),
+            nn.BatchNorm2d(32, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(inplace=False),
             nn.AdaptiveAvgPool2d((10, 22)),
         )
-        self.gru = nn.GRU(input_size=320, hidden_size=128, batch_first=True)
-        self.drop = nn.Dropout(0.3)
-        self.head = nn.Linear(128, 1)
+        self.gru = nn.GRU(input_size=320, hidden_size=128, num_layers=1, bias=True, batch_first=True,
+                          dropout=0.0, bidirectional=False)
+        self.drop = nn.Dropout(p=0.3, inplace=False)
+        self.head = nn.Linear(128, 1, bias=True)
 
     def score_features(self, feats):
         """(batch, 1, N_MELS, frames) log-mel -> (batch,) wake-word logits. Shared by training, scoring and Core ML export."""
@@ -212,7 +220,7 @@ def place_in_window(clip, window_len, rng):
     return out
 
 
-NOISE_DIR = os.path.join(HERE, "..", "lab", "wakeword", "noise")
+NOISE_DIR = os.path.join(ROOT, "lab", "wakeword", "noise")
 
 _AUGMENTS = [
     TimeStretch(min_rate=0.9, max_rate=1.1, leave_length_unchanged=True, p=0.5),
@@ -418,13 +426,14 @@ def main():
     env = {"python": sys.version.split()[0], "torch": torch.__version__, "numpy": np.__version__,
            "coremltools": coremltools_version}
     # Every WAV in NOISE_DIR is a candidate for background noise, so record all of them with a hash.
-    noise = {os.path.basename(p): git_blob_id(p) for p in sorted(glob.glob(os.path.join(NOISE_DIR, "*.wav")))}
+    noise_nfhash = {os.path.basename(p): nf_hash_file(p) for p in sorted(glob.glob(os.path.join(NOISE_DIR, "*.wav")))}
     run_args = {k: (repo_relative(v) if k in ("media", "extra", "out", "take") and v else v)
                 for k, v in vars(args).items()}
     with open(os.path.join(args.out, "run.json"), "w") as f:
-        json.dump({"version": args.version, "wakeword": args.wakeword, "env": env, "train_py_blob": git_blob_id(__file__),
-                   "model": model_description(model), "window_len": window_len, "inputs": inputs,
-                   "holdout": holdout_paths, "noise": noise, "args": run_args}, f, indent=2)
+        json.dump({"version": args.version, "wakeword": args.wakeword, "env": env,
+                   "train_py_nfhash": nf_hash_file(__file__), "wakenet_nfhash": nf_hash_file(os.path.join(args.out, "wakenet.pt")),
+                   "model": model_description(model), "window_len": window_len, "inputs_nfhash": inputs,
+                   "holdout": holdout_paths, "noise_nfhash": noise_nfhash, "train_args": run_args}, f, indent=2)
 
     print(f"\nclips triggered at p>={args.threshold}:")
     print(f"  positives {trig['positive'][0]}/{trig['positive'][1]}")

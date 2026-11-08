@@ -12,7 +12,7 @@
 #     extra clips, then scores every clip, scoring the take clips as holdout
 #   - writes each run to <out>/<version>/<take>-<run id>/ containing wakenet.pt,
 #     scores.csv and run.json
-#       version: first 6 chars of the nf id --file-mod timeId of train.py
+#       version: first 9 chars of the nf hash of train.py (scripts/nfhash.py)
 #       run id:  first 6 chars of a fresh nf id
 #
 # Usage:
@@ -52,9 +52,9 @@ if [ ! -x "$VENV/bin/python" ]; then
     (cd "$HERE/.." && uv sync --frozen)
 fi
 
-# Version is the first 6 characters of the file-modification timeId of train.py.
+# Version is the first 9 characters of the nf hash (SHA-256, nf alphabet) of train.py.
 # Run ID is the first 6 characters of a fresh nf id.
-TRAIN_VERSION="$(nf id --file-mod "$HERE/train.py" | cut -c1-6)"
+TRAIN_VERSION="$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/train.py" | cut -c1-9)"
 RUN_ID="$(nf id | cut -c1-6)"
 
-exec "$VENV/bin/python" "$HERE/train.py" --version "$TRAIN_VERSION" --run-id "$RUN_ID" "$@"
+exec "$VENV/bin/python" "$HERE/python/train.py" --version "$TRAIN_VERSION" --run-id "$RUN_ID" "$@"

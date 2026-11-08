@@ -26,8 +26,8 @@ private func readFloats(_ url: URL) throws -> [Float] {
     let frames = try #require(manifest?["frames"] as? Int)
     let nMels = try #require(manifest?["n_mels"] as? Int)
     // The reference features must come from the front end this port was written from.
-    #expect(manifest?["frontend_id"] as? String == LogMelFrontEnd.frontendID,
-            "reference features are from front end \(manifest?["frontend_id"] ?? "none"), port is \(LogMelFrontEnd.frontendID)")
+    #expect(manifest?["frontend_nfhash"] as? String == LogMelFrontEnd.frontendID,
+            "reference features are from front end \(manifest?["frontend_nfhash"] ?? "none"), port is \(LogMelFrontEnd.frontendID)")
 
     let audio = try readFloats(dir.appendingPathComponent("windows.f32"))
     let reference = try readFloats(dir.appendingPathComponent("features.f32"))

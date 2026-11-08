@@ -68,7 +68,7 @@ def main():
         "windows": int(audio.shape[0]),
         "frames": int(features.shape[2]),
         "window_clip": names,
-        "frontend_id": train.frontend_id(),
+        "frontend_nfhash": train.frontend_nfhash(),
         "source_blob": train.git_blob_id(__file__),
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:

@@ -1,4 +1,4 @@
-"""Unit tests for the wake-word matcher (scripts/wakeword_matcher.py). Run with: .venv/bin/python scripts/test_wakeword_matcher.py"""
+"""Unit tests for the wake-word matcher (scripts/wakeword_matcher.py). Run with: .venv/bin/python scripts/python/tests/test_wakeword_matcher.py"""
 
 import os
 import sys
@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from wakeword_matcher import clip_triggers, triggers  # noqa: E402
 
 

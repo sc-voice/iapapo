@@ -1,0 +1,41 @@
+#!/bin/sh
+# Exports one wake-word run to Core ML: writes wakenet.mlpackage and export.json into the run folder.
+# Then archives the minimal record needed to rebuild the export under models/wakeword/<version>/<run id>/:
+#   - run.json: training provenance (seed, args, train.py hash, data hashes, environment)
+#   - export.json: export settings and library versions
+#   - export_coreml_nfhash: nf hash of scripts/python/export_coreml.py, the code that made the export
+# wakenet.pt is not archived here. Archive it only for production candidates.
+#
+# Runs from any directory. Runs export_coreml.py with the project's venv, found relative to this script.
+#
+# Usage:
+#   scripts/export.sh <run folder>
+#
+# Example:
+#   scripts/export.sh lab/wakeword/out/<version>/<run>
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+VENV="$HERE/../.venv"
+ROOT="$HERE/.."
+RUN="$1"
+
+"$VENV/bin/python" "$HERE/python/export_coreml.py" "$@" || exit $?
+
+DEST=$("$VENV/bin/python" -c '
+import json, sys, os
+run = sys.argv[1]
+d = json.load(open(os.path.join(run, "run.json")))
+print(os.path.join(sys.argv[2], "models", "wakeword", d["version"], d["train_args"]["run_id"]))
+' "$RUN" "$ROOT") || exit $?
+
+mkdir -p "$DEST"
+cp "$RUN/run.json" "$DEST/run.json"
+NFHASH=$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/export_coreml.py") || exit $?
+"$VENV/bin/python" -c '
+import json, sys
+src, dst, nfhash = sys.argv[1], sys.argv[2], sys.argv[3]
+d = json.load(open(src))
+d["export_coreml_nfhash"] = nfhash
+json.dump(d, open(dst, "w"), indent=2)
+' "$RUN/export.json" "$DEST/export.json" "$NFHASH" || exit $?
+echo "archived: $DEST"

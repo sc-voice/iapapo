@@ -22,10 +22,11 @@ import soundfile as sf
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.join(HERE, "..", "..")
 sys.path.insert(0, HERE)
 import train as T  # noqa: E402
 
-MEDIA = os.path.join(HERE, "..", "media")
+MEDIA = os.path.join(ROOT, "media")
 
 
 def decode_16k(path, tmp):
@@ -60,7 +61,8 @@ def main():
     args = ap.parse_args()
 
     with open(os.path.join(args.run, "run.json")) as f:
-        meta = json.load(f)["args"]
+        meta = json.load(f)
+    meta = meta.get("train_args") or meta["args"]  # "args" is the key in runs trained before the rename
     model = T.WakeNet()
     model.load_state_dict(torch.load(os.path.join(args.run, "wakenet.pt")))
     model.eval()

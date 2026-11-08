@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.join(HERE, "..", "..")
 sys.path.insert(0, HERE)
 import train  # noqa: E402
 
@@ -47,6 +48,13 @@ def window_len_from_run(run_dir):
     if "window_len" not in meta:
         raise SystemExit("run.json has no window_len; this run predates the current train.py. Retrain it.")
     return meta["window_len"]
+
+
+def run_identity(run_dir):
+    """run_id (which training run, and its data) and train_py_nfhash (hash of train.py), as recorded in run.json."""
+    with open(os.path.join(run_dir, "run.json")) as f:
+        meta = json.load(f)
+    return {"run_id": meta["train_args"]["run_id"], "train_py_nfhash": meta["train_py_nfhash"]}
 
 
 def frames_for(window_len):
@@ -81,11 +89,13 @@ def export(run_dir, window_len):
         convert_to="mlprogram",
         compute_precision=ct.precision.FLOAT32,
     )
+    for key, value in run_identity(run_dir).items():
+        mlmodel.user_defined_metadata[key] = value
     out_path = os.path.join(run_dir, "wakenet.mlpackage")
     mlmodel.save(out_path)
 
     meta = {
-        "source": os.path.join(run_dir, "wakenet.pt"),
+        "source": os.path.relpath(os.path.join(run_dir, "wakenet.pt"), ROOT),
         "window_len": window_len,
         "window_s": window_len / train.SR,
         "sample_rate": train.SR,

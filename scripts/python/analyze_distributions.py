@@ -46,14 +46,15 @@ def analyze_distribution(paths, label):
 def main():
     # Paths from train.py
     HERE = os.path.dirname(os.path.abspath(__file__))
-    MEDIA_NEG = os.path.join(HERE, "..", "media", "negative")
+    ROOT = os.path.join(HERE, "..", "..")
+    MEDIA_NEG = os.path.join(ROOT, "media", "negative")
     
     # We need to find a holdout to compare. 
     # Since I don't have the actual 'takes' paths easily, 
     # I will look for any wav in the lab/wakeword directory that isn't 'extra'
     # or just use the 'noise' directory as a proxy for "other negatives" if needed.
     # But let's try to find the 'takes' directory.
-    TAKES_DIR = os.path.join(HERE, "..", "lab", "wakeword", "takes")
+    TAKES_DIR = os.path.join(ROOT, "lab", "wakeword", "takes")
     
     # 1. Analyze Training Negatives
     train_neg_paths = glob.glob(os.path.join(MEDIA_NEG, "*.m4a"))
@@ -67,7 +68,7 @@ def main():
 
     # 2. Analyze Holdout Negatives (or proxy)
     # Let's look at the 'noise' folder as a comparison point for "environmental" negatives
-    NOISE_DIR = os.path.join(HERE, "..", "lab", "wakeword", "noise")
+    NOISE_DIR = os.path.join(ROOT, "lab", "wakeword", "noise")
     noise_paths = glob.glob(os.path.join(NOISE_DIR, "*.wav"))
     noise_rms, noise_spec = analyze_distribution(noise_paths, "Noise Folder")
 

@@ -69,8 +69,7 @@ def main():
 
     with open(os.path.join(run_dir, "run.json")) as f:
         run_meta = json.load(f)
-    model_run_id = run_meta["args"]["run_id"]
-    graph_id = run_meta.get("model", {}).get("graph_id")
+    model_run_id = (run_meta.get("train_args") or run_meta["args"])["run_id"]  # "args" is the key in runs trained before the rename
     window_len = window_len_from_run(run_dir)
     names, labels, windows = windows_for_run(take_dir, window_len)
 
@@ -110,7 +109,6 @@ def main():
     report = {
         "run_id": match_id,
         "model_run_id": model_run_id,
-        "graph_id": graph_id,
         "take": train.repo_relative(take_dir),
         "window_len": window_len,
         "passed": passed,

@@ -15,7 +15,7 @@ import Foundation
 /// scripts/train.py, hashing the source of `log_mel` and `mel_filterbank` with the audio constants.
 /// If the Python front end changes, its id changes, and the reference test fails until this port is updated.
 public struct LogMelFrontEnd {
-    public static let frontendID = "be4b551a8efeca01778832af9ee405857508c69d"
+    public static let frontendID = "ICCfT6m86s3LNJs66W6P8Hm3QhUu0tURoylfYdgVZWe"
     public static let sampleRate = 16_000
     public static let nFFT = 400
     public static let hop = 160

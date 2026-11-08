@@ -5,6 +5,7 @@
 
 import AVFoundation
 import Observation
+import VACore
 
 /// Whether a clip contains the wake word or something else.
 enum SampleLabel: String {
@@ -19,15 +20,17 @@ struct SampleStore {
     let root: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appending(path: "WakeWord", directoryHint: .isDirectory)
 
-    private static let stamp: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return formatter
-    }()
+    /// The first 8 characters of the UUID64 timeId for `date`: its full 48-bit millisecond timestamp in the
+    /// nf order-preserving alphabet, so names sort chronologically and each name is exact to 1 ms.
+    static func timeId8(_ date: Date) -> String {
+        let value = UInt64(date.timeIntervalSince1970 * 1000) << 16
+        let bytes = (0..<8).map { UInt8(truncatingIfNeeded: value >> UInt64(56 - 8 * $0)) }
+        return String(OPB64.encode(bytes).prefix(8))
+    }
 
-    /// Creates a take folder named by its start time, so takes sort chronologically.
+    /// Creates a take folder named by its 8-character timeId, so takes sort chronologically.
     func newTake() throws -> URL {
-        let take = root.appending(path: Self.stamp.string(from: .now), directoryHint: .isDirectory)
+        let take = root.appending(path: Self.timeId8(.now), directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: take, withIntermediateDirectories: true)
         return take
     }

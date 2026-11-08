@@ -51,23 +51,23 @@ All negatives are prompt-based and are kept as they are.
 
 1. Resample every clip from 48 kHz to 16 kHz, and average channels if a clip is not mono (the training script's loader). The wizard clips are already mono.
 2. Trim each positive and each negative to its speech onset and offset. Trimming is for training only; do not change the saved files.
-3. Set the window length to the longest trimmed positive, 0.855 s, so every wake word fits whole in a window. Scoring slides the window every 0.25 s.
+3. Set the window length to the longest trimmed positive, 0.893 s (14287 samples, as in the current runs' `run.json`), so every wake word fits whole in a window. Scoring slides the window every 0.25 s.
 4. Extract log-mel features (25 ms frames, 10 ms hop, 40 mel bands) and train `WakeNet`, a three-block CNN, in PyTorch.
-5. Save the weights and log each clip's window scores to `scores.csv`, in a per-run folder named by version, take and run ID. Export to Core ML is planned, not yet done.
+5. Save the weights and log each clip's window scores to `scores.csv`, in a per-run folder named by version, take and run ID. Export to Core ML is done for the export candidate `dkQlX-bLy/no-take-0Q6x7T`, archived under `models/wakeword/dkQlX-bLy/0Q6x7T/`.
 
 ## Evaluation
 
 - **Held-out data:** the training clips cannot evaluate themselves. Hold out a whole take, or record a new one, before trusting any score.
 - **Per-source counts:** count triggers on positives and on negatives separately, as the article suggests, so a false trigger on the user's own speech is visible.
 - **Success for this experiment:** the model triggers on held-out "IaPapo" clips and stays quiet on held-out negatives. A pass here does not yet cover other voices or rooms.
-- **Current result (training clips only, no holdout):** run `0Q6YVH` (version `0Q6YVG`), with trimmed negatives and the longest window. All positives triggered (max 0.972 to 0.988). No negatives triggered (max 0.009 to 0.126). This does not meet the success criterion yet, because it has no held-out data.
+- **Earlier result, superseded by the seed sweep in [[0Q6jyMMM00D3Ywo0oukl7W]] (training clips only, no holdout):** run `0Q6YVH` (version `0Q6YVG`), with trimmed negatives and the longest window. All positives triggered (max 0.972 to 0.988). No negatives triggered (max 0.009 to 0.126). This does not meet the success criterion yet, because it has no held-out data.
 
 ## Decisions
 
 Made, as the code shows:
 
 - Model: `WakeNet`, a small CNN over log-mel features, trained in PyTorch.
-- Window length: longest trimmed positive, 0.855 s.
+- Window length: longest trimmed positive, 0.893 s.
 - Front end: 16 kHz, 25 ms frames, 10 ms hop, 40 mel bands.
 - Negatives are trimmed like positives. Silence is controlled by trimming, and background noise is added as augmentation, so no silence-only file is needed.
 - Model location: the app's Documents/models folder, exposed through file sharing so the user and Xcode can both reach it. Interim. It is included in backups by default, which is covered by the privacy open item.
@@ -96,6 +96,6 @@ Proposed, not decided. Train a base model on recordings from many speakers sayin
 1. Record the happy, sad, and neutral requests as negatives.
 2. Record `say` clips through the speakers as self-echo negatives.
 3. Record a held-out take, and evaluate the current model on it.
-4. Export `wakenet.pt` to Core ML at the 0.855 s window, and check its outputs against PyTorch.
+4. Check the Core ML export of `dkQlX-bLy/no-take-0Q6x7T` (0.893 s window) against PyTorch outputs.
 5. Port the front end to Swift, and test its features against the Python ones.
 6. Add an on-device update of the final layer, once the export works.
