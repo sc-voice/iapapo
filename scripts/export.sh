@@ -2,6 +2,9 @@
 # Exports one wake-word run to Core ML: writes wakenet.mlpackage and export.json into the run folder.
 # Then archives the minimal record needed to rebuild the export under models/wakeword/<version>/<run id>/:
 #   - run.json: training provenance (seed, args, train.py hash, data hashes, environment)
+#   - scores.csv: per-window scores of every clip, as train.py wrote them
+#   - run.log: the training log, which train-summary reads for positive clip lengths
+#   - train.json: the complete input record the engine ran on
 #   - export.json: export settings and library versions
 #   - export_coreml_nfhash: nf hash of scripts/python/export_coreml.py, the code that made the export
 # wakenet.pt is not archived here. Archive it only for production candidates.
@@ -29,7 +32,10 @@ print(os.path.join(sys.argv[2], "models", "wakeword", d["version"], d["train_arg
 ' "$RUN" "$ROOT") || exit $?
 
 mkdir -p "$DEST"
-cp "$RUN/run.json" "$DEST/run.json"
+cp "$RUN/run.json" "$DEST/run.json" || exit $?
+cp "$RUN/scores.csv" "$DEST/scores.csv" || exit $?
+cp "$RUN/run.log" "$DEST/run.log" || exit $?
+cp "$RUN/train.json" "$DEST/train.json" || exit $?
 NFHASH=$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/export_coreml.py") || exit $?
 "$VENV/bin/python" -c '
 import json, sys

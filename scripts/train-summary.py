@@ -4,9 +4,10 @@
 The _s1-_s3 columns are sentence negatives used for training, so a high score there is a fit failure, not
 generalization; the holdouts are _1-_3.
 
-Usage: scripts/train-summary.py [RUN_DIR]
+Usage: scripts/train-summary.py [RUN]
 
-RUN_DIR is a run folder holding scores.csv. Omit it to use the run whose scores.csv is newest under lab/wakeword/out.
+RUN is a run folder holding scores.csv, or a run id such as 0Q6-Uz, found under lab/wakeword/out.
+Omit it to use the run whose scores.csv is newest under lab/wakeword/out.
 Each cell is the highest probability over all sliding windows of that clip. Scores below 0.1 print as --, and
 columns where every score is below 0.1 are dropped.
 """
@@ -27,6 +28,7 @@ CLIP = re.compile(r"^negative-(.+)_(s?[1-7]q?)$")
 POSITIVE = re.compile(r"^positive-(.+?)_(_|[a-z])$")
 MIN_SHOWN = 0.1
 POSITIVE_THRESHOLD = 0.5  # the train.py --threshold default: a clip counts as triggered at or above this
+POSITIVE_STRONG = 0.9  # positive scores at or above this print in green
 COL_WIDTH = 7
 
 
@@ -36,6 +38,28 @@ def latest_run(root):
     if not found:
         raise SystemExit(f"no scores.csv under {root}")
     return os.path.dirname(max(found, key=os.path.getmtime))
+
+
+def find_run(root, run_id):
+    """Return the run folder under root whose name ends with -<run_id> and that holds a scores.csv.
+
+    Run ids can contain '-', so the match is on the whole suffix, not on splitting the folder name.
+
+    Args:
+        root: the output root, lab/wakeword/out.
+        run_id: a run id as printed in run.json, such as 0Q6-Uz.
+
+    Returns:
+        The run folder path.
+
+    Raises:
+        SystemExit: if zero or several run folders match.
+    """
+    matches = [d for d in glob.glob(os.path.join(root, "*", "*"))
+               if os.path.basename(d).endswith("-" + run_id) and os.path.isfile(os.path.join(d, "scores.csv"))]
+    if len(matches) != 1:
+        raise SystemExit(f"{len(matches)} runs under {root} match run id {run_id!r}: {sorted(matches)}")
+    return matches[0]
 
 
 def max_scores(run_dir):
@@ -109,7 +133,8 @@ def positive_table(scores):
 
 def render_positives(voices, table):
     """Print the positive table: one row per voice, one column per positive suffix. A voice with no clip of that
-    suffix prints ∅. Scores below POSITIVE_THRESHOLD print in red on a terminal."""
+    suffix prints a gray --. On a terminal, scores below POSITIVE_THRESHOLD print in red and scores at or above
+    POSITIVE_STRONG print in green."""
     cols = sorted({s for v in voices for s in table[v]})
     if not cols:
         print("no positive clips")
@@ -120,21 +145,30 @@ def render_positives(voices, table):
         cells = []
         for s in cols:
             if s not in table[v]:
-                cells.append(f"{'∅':>{COL_WIDTH}s}")
+                dash = f"{'--':>{COL_WIDTH}s}"
+                cells.append(f"\033[90m{dash}\033[0m" if sys.stdout.isatty() else dash)  # gray: no clip of this suffix
                 continue
             text = f"{table[v][s]:>{COL_WIDTH}.2f}"
-            if table[v][s] < POSITIVE_THRESHOLD and sys.stdout.isatty():
-                text = f"\033[31m{text}\033[0m"  # red: below the trigger threshold
+            if sys.stdout.isatty():
+                if table[v][s] < POSITIVE_THRESHOLD:
+                    text = f"\033[31m{text}\033[0m"  # red: below the trigger threshold
+                elif table[v][s] >= POSITIVE_STRONG:
+                    text = f"\033[32m{text}\033[0m"  # green: strong positive
             cells.append(text)
         print(v.ljust(width) + "".join(cells))
 
 
 def main():
     ap = argparse.ArgumentParser(description="Per-voice hard-negative score table for one train.py run.")
-    ap.add_argument("run_dir", nargs="?", default=None,
-                    help="run folder containing scores.csv (default: newest run under lab/wakeword/out)")
+    ap.add_argument("run", nargs="?", default=None,
+                    help="run folder containing scores.csv, or a run id such as 0Q6-Uz (default: newest run under lab/wakeword/out)")
     args = ap.parse_args()
-    run_dir = os.path.abspath(args.run_dir) if args.run_dir else latest_run(DEFAULT_OUT)
+    if args.run is None:
+        run_dir = latest_run(DEFAULT_OUT)
+    elif os.path.isdir(args.run):
+        run_dir = os.path.abspath(args.run)
+    else:
+        run_dir = find_run(DEFAULT_OUT, args.run)
     print(f"run: {os.path.relpath(run_dir, os.path.join(HERE, '..'))}")
     lengths = positive_lengths(run_dir)
     scores = max_scores(run_dir)

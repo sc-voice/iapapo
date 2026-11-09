@@ -88,6 +88,7 @@ test-core:
 test-wakeword:
 	$(PY) scripts/python/tests/test_wakeword_matcher.py
 	$(PY) scripts/python/tests/test_nfhash.py
+	$(PY) scripts/python/tests/test_train_cli.py
 	$(MAKE) match
 	swift test -c release --package-path VACore --filter logMel
 

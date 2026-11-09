@@ -1,0 +1,20 @@
+{
+  "batch": 32,
+  "extra": "lab/wakeword/extra",
+  "holdout": [],
+  "lr": 0.001,
+  "media": "media",
+  "no_extra": false,
+  "noise": "lab/wakeword/noise",
+  "noise_snr": [
+    3.0,
+    30.0
+  ],
+  "schema": 1,
+  "seed": 5,
+  "steps": 6000,
+  "take": null,
+  "threshold": 0.5,
+  "wakeword": "iapapo",
+  "window_scale": 1.0
+}

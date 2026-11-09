@@ -1,5 +1,5 @@
 {
-  "version": "dkQlX-bLy",
+  "version": "JNaU8v4L6",
   "wakeword": "iapapo",
   "env": {
     "python": "3.12.15",
@@ -7,8 +7,8 @@
     "numpy": "2.5.4",
     "coremltools": "9.0"
   },
-  "train_py_nfhash": "dkQlX-bLyU8dvzvYmL6_1o42yDcUAX_d0objNhkATnG",
-  "wakenet_nfhash": "0VvWckm-IuFGxCy9mnLJzzRj5cPL0p8SbnprHWJxQ_y",
+  "train_py_nfhash": "JNaU8v4L6ZBaO68jYOI06ie2Q08mye9Y2j327uyMGuG",
+  "wakenet_nfhash": "Vtll5QV0o8c6IAf80dsaPiLQtzGeo-46yAxAQSW2k5O",
   "model": {
     "frontend_nfhash": "ICCfT6m86s3LNJs66W6P8Hm3QhUu0tURoylfYdgVZWe",
     "params": 187137,
@@ -467,25 +467,26 @@
   "noise_nfhash": {
     "651259-cafe-05.wav": "MrxpPH1y8MbxsXSWL3s6SRtvonw_u_BtwBRBC1rWvuW"
   },
+  "train_json_nfhash": "xSnexvUdFRuK5YFLjtPhfdNLaBtBC7jKv8wlyHn0IQ4",
   "train_args": {
-    "media": "media",
-    "wakeword": "iapapo",
-    "take": null,
-    "holdout": [],
-    "steps": 6000,
     "batch": 32,
+    "extra": "lab/wakeword/extra",
+    "holdout": [],
     "lr": 0.001,
-    "threshold": 0.5,
-    "seed": 15,
+    "media": "media",
+    "no_extra": false,
+    "noise": "lab/wakeword/noise",
     "noise_snr": [
       3.0,
       30.0
     ],
+    "schema": 1,
+    "seed": 5,
+    "steps": 6000,
+    "take": null,
+    "threshold": 0.5,
+    "wakeword": "iapapo",
     "window_scale": 1.0,
-    "extra": "lab/wakeword/extra",
-    "no_extra": false,
-    "out": "lab/wakeword/out/dkQlX-bLy/no-take-0Q6x7T",
-    "version": "dkQlX-bLy",
-    "run_id": "0Q6x7T"
+    "run_id": "0Q6-ou"
   }
 }

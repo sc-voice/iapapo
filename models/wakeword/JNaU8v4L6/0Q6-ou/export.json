@@ -1,5 +1,5 @@
 {
-  "source": "lab/wakeword/out/dkQlX-bLy/no-take-0Q6x7T/wakenet.pt",
+  "source": "lab/wakeword/out/JNaU8v4L6/no-take-0Q6-ou/wakenet.pt",
   "window_len": 14287,
   "window_s": 0.8929375,
   "sample_rate": 16000,

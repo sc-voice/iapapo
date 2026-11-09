@@ -6,7 +6,9 @@ from the trimmed positive duration. Negatives are random crops of the negative c
 Every training sample is augmented with a random gain and background noise. Clips in
 --take are scored only, never trained on.
 
-Run it through scripts/train.sh, which sets up the environment first.
+Run it on a train.json from scripts/python/train_cli.py:
+    train.py <run folder>/train.json --run-id ID
+scripts/train.sh does that and sets up the environment first.
 """
 
 import argparse
@@ -21,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 import numpy as np
 import time
@@ -37,10 +40,7 @@ from nfhash import nf_hash, nf_hash_file
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..", "..")
-DEFAULT_EXTRA = os.path.join(ROOT, "lab", "wakeword", "extra")
-DEFAULT_MEDIA = os.path.join(ROOT, "media")
-DEFAULT_OUT = os.path.join(ROOT, "lab", "wakeword", "out")
-TAKES = os.path.join(ROOT, "lab", "wakeword", "takes")
+SCHEMA = 1  # train.json schema; must match scripts/python/train_cli.py
 SR = 16000
 HOP_S = 0.010
 FRAME_S = 0.025
@@ -220,22 +220,16 @@ def place_in_window(clip, window_len, rng):
     return out
 
 
-NOISE_DIR = os.path.join(ROOT, "lab", "wakeword", "noise")
-
 _AUGMENTS = [
     TimeStretch(min_rate=0.9, max_rate=1.1, leave_length_unchanged=True, p=0.5),
     Gain(min_gain_db=-6, max_gain_db=6, p=1.0),
     AddGaussianSNR(min_snr_db=10, max_snr_db=30, p=1.0),
 ]
-def build_augment(noise_snr=(3.0, 30.0)):
-    """Return the training augmentation chain. Background noise from NOISE_DIR is added at noise_snr (min, max) dB, p=0.5, only when that folder has WAVs."""
+def build_augment(noise_dir, noise_snr=(3.0, 30.0)):
+    """Return the training augmentation chain. Background noise from noise_dir is added at noise_snr (min, max) dB, p=0.5."""
     augments = list(_AUGMENTS)
-    if glob.glob(os.path.join(NOISE_DIR, "*.wav")):
-        augments.append(AddBackgroundNoise(sounds_path=NOISE_DIR, min_snr_db=noise_snr[0], max_snr_db=noise_snr[1], p=0.5))
+    augments.append(AddBackgroundNoise(sounds_path=noise_dir, min_snr_db=noise_snr[0], max_snr_db=noise_snr[1], p=0.5))
     return Compose(augments)
-
-
-AUGMENT = build_augment()
 
 
 def augment(x):
@@ -255,46 +249,63 @@ def sliding_scores(model, clip, window_len):
     return np.array(starts) / SR, probs
 
 
+def load_train_json(path):
+    """Read train.json, the complete input record for one run, and check its keys and types. Never modifies the file.
+
+    Args:
+        path: the train.json written by scripts/python/train_cli.py.
+
+    Returns:
+        The record as a dict.
+
+    Raises:
+        SystemExit: if the schema differs, a key is missing or unknown, or a value has the wrong type.
+    """
+    with open(path) as f:
+        rec = json.load(f)
+    if rec.get("schema") != SCHEMA:
+        raise SystemExit(f"{path}: schema {rec.get('schema')!r}, expected {SCHEMA}")
+    kinds = {"media": str, "wakeword": str, "take": (str, type(None)), "holdout": list, "steps": int,
+             "batch": int, "lr": float, "threshold": float, "seed": int, "noise": str,
+             "noise_snr": list, "window_scale": float, "extra": str, "no_extra": bool}
+    unknown = sorted(set(rec) - set(kinds) - {"schema"})
+    missing = sorted(set(kinds) - set(rec))
+    if unknown or missing:
+        raise SystemExit(f"{path}: unknown keys {unknown}, missing keys {missing}")
+    for key, kind in kinds.items():
+        bad_bool = kind is int and isinstance(rec[key], bool)
+        if bad_bool or not isinstance(rec[key], kind):
+            raise SystemExit(f"{path}: {key} has the wrong type: {rec[key]!r}")
+    if len(rec["noise_snr"]) != 2 or not all(isinstance(v, float) for v in rec["noise_snr"]):
+        raise SystemExit(f"{path}: noise_snr must be two floats")
+    return rec
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Train a small CNN wake-word recognizer on one take. Writes wakenet.pt, scores.csv and run.json to a run folder under --out.")
-    ap.add_argument("--media", default=DEFAULT_MEDIA,
-                    help="folder with <wakeword>/ (positives) and negative/ (negatives) m4a clips, used for training (default: media)")
-    ap.add_argument("--wakeword", default="iapapo",
-                    help="wake word the model detects: its positive clips are read from <media>/<wakeword>/ and it is recorded in run.json (default: iapapo)")
-    ap.add_argument("--take", default=None,
-                    help="iPad take folder of positive-*.wav and negative-*.wav, scored as holdout and never trained on; a bare name is looked up in lab/wakeword/takes/ (default: none, agent holdouts only)")
-    ap.add_argument("--holdout", nargs="*", default=[],
-                    help="clip names to exclude from training; they are scored and reported as holdout")
-    ap.add_argument("--steps", type=int, default=6000, help="training steps, one random batch each (default 6000)")
-    ap.add_argument("--batch", type=int, default=32, help="samples per step (default 32)")
-    ap.add_argument("--lr", type=float, default=1e-3, help="Adam starting learning rate, cosine-decayed to zero over --steps (default 1e-3)")
-    ap.add_argument("--threshold", type=float, default=0.5, help="probability at which a clip counts as triggered (default 0.5)")
-    ap.add_argument("--seed", type=int, default=0, help="random seed for reproducible runs, 0 to 4294967295 (default 0)")
-    ap.add_argument("--noise-snr", type=float, nargs=2, metavar=("MIN", "MAX"), default=[3.0, 30.0],
-                    help="SNR range in dB for background noise when lab/wakeword/noise has WAVs (default 3 30)")
-    ap.add_argument("--window-scale", type=float, default=1.0,
-                    help="training and scoring window as a multiple of the longest trimmed positive (default 1.0)")
-    ap.add_argument("--extra", default=DEFAULT_EXTRA, help="extra clips added to training (default: lab/wakeword/extra)")
-    ap.add_argument("--no-extra", action="store_true", help="do not use the extra clips")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="output root; run folder is <out>/<version>/<take>-<run-id>/ (default: lab/wakeword/out)")
-    ap.add_argument("--version", required=True, help="version of this script, recorded in run.json (set by scripts/train.sh)")
-    ap.add_argument("--run-id", required=True, help="run identifier, appended to the run folder name (set by scripts/train.sh)")
-    args = ap.parse_args()
+        description="Train a wake-word CNN from a train.json input record. Writes wakenet.pt, scores.csv, run.json and run.log into the folder that holds train.json.")
+    ap.add_argument("train_json", help="train.json input record, written by scripts/python/train_cli.py")
+    ap.add_argument("--run-id", required=True, help="run identifier, recorded in run.json (set by scripts/train.sh)")
+    cli = ap.parse_args()
+    rec = load_train_json(cli.train_json)
+    out = os.path.dirname(os.path.abspath(cli.train_json))
+    if os.path.exists(os.path.join(out, "run.json")):
+        raise SystemExit(f"{out} already holds a run; use a new run folder")
+    args = SimpleNamespace(**rec, run_id=cli.run_id, out=out, version=nf_hash_file(__file__)[:9])
+    args.media = os.path.join(ROOT, args.media)
+    args.extra = os.path.join(ROOT, args.extra)
+    noise_dir = os.path.join(ROOT, args.noise)
+    noise_wavs = sorted(glob.glob(os.path.join(noise_dir, "*.wav")))
+    if not noise_wavs:
+        raise SystemExit(f"noise folder has no WAVs: {noise_dir}")
+    # Hashed on load, so run.json certifies the noise files this run was trained with.
+    noise_nfhash = {os.path.basename(p): nf_hash_file(p) for p in noise_wavs}
     global AUGMENT
-    AUGMENT = build_augment(tuple(args.noise_snr))
-    if args.take is None:
-        take = None
-    else:
-        take = os.path.join(TAKES, args.take) if os.path.basename(args.take) == args.take else args.take
-    if take is not None:
-        take = os.path.abspath(take)
-        if not os.path.isdir(take):
-            raise SystemExit(f"take directory not found: {take}")
+    AUGMENT = build_augment(noise_dir, tuple(args.noise_snr))
+    take = os.path.join(ROOT, args.take) if args.take else None
+    if take is not None and not os.path.isdir(take):
+        raise SystemExit(f"take directory not found: {take}")
     args.take = take
-    run_name = os.path.basename(take) if take else "no-take"
-    args.out = os.path.join(args.out, args.version, f"{run_name}-{args.run_id}")
-    os.makedirs(args.out, exist_ok=False)
     TTY = sys.stdout.isatty()
     sys.stdout = Tee(sys.stdout, open(os.path.join(args.out, "run.log"), "w"))
 
@@ -425,15 +436,14 @@ def main():
         coremltools_version = None
     env = {"python": sys.version.split()[0], "torch": torch.__version__, "numpy": np.__version__,
            "coremltools": coremltools_version}
-    # Every WAV in NOISE_DIR is a candidate for background noise, so record all of them with a hash.
-    noise_nfhash = {os.path.basename(p): nf_hash_file(p) for p in sorted(glob.glob(os.path.join(NOISE_DIR, "*.wav")))}
-    run_args = {k: (repo_relative(v) if k in ("media", "extra", "out", "take") and v else v)
-                for k, v in vars(args).items()}
+    # train_args is the train.json record plus the run id, which the readers look up.
+    run_args = {**rec, "run_id": args.run_id}
     with open(os.path.join(args.out, "run.json"), "w") as f:
         json.dump({"version": args.version, "wakeword": args.wakeword, "env": env,
                    "train_py_nfhash": nf_hash_file(__file__), "wakenet_nfhash": nf_hash_file(os.path.join(args.out, "wakenet.pt")),
                    "model": model_description(model), "window_len": window_len, "inputs_nfhash": inputs,
-                   "holdout": holdout_paths, "noise_nfhash": noise_nfhash, "train_args": run_args}, f, indent=2)
+                   "holdout": holdout_paths, "noise_nfhash": noise_nfhash,
+                   "train_json_nfhash": nf_hash_file(os.path.join(args.out, "train.json")), "train_args": run_args}, f, indent=2)
 
     print(f"\nclips triggered at p>={args.threshold}:")
     print(f"  positives {trig['positive'][0]}/{trig['positive'][1]}")
