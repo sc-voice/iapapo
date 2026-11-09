@@ -22,5 +22,5 @@
   "coremltools": "9.0",
   "torch": "2.7.0",
   "export_coreml_nfhash": "t1QNCEw63WzRJwzryg1_1-CGra5ILgD11w_qhMHgAgy",
-  "git_commit": "UNCOMMITTED"
+  "git_commit": "482c762f29cc5852e051024339a79670078bcbda"
 }

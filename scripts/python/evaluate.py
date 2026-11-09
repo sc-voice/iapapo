@@ -46,8 +46,9 @@ def main():
     train_args = meta.get("train_args") or meta["args"]  # "args" is the key in runs trained before the rename
     threshold = args.threshold if args.threshold is not None else train_args["threshold"]
 
-    # Own run ID for this evaluation, from the same nf id source as scripts/train.sh (first 6 characters).
-    eval_id = subprocess.run(["nf", "id"], capture_output=True, text=True, check=True).stdout.strip()[:6]
+    # Own run ID for this evaluation, from the same nf id source as scripts/train.sh (first 7 characters:
+    # 6 characters repeat across evaluations run seconds apart).
+    eval_id = subprocess.run(["nf", "id"], capture_output=True, text=True, check=True).stdout.strip()[:7]
 
     weights = os.path.join(run_dir, "wakenet.pt")
     model = train.WakeNet().eval()

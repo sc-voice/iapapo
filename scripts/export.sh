@@ -22,14 +22,24 @@ VENV="$HERE/../.venv"
 ROOT="$HERE/.."
 RUN="$1"
 
-"$VENV/bin/python" "$HERE/python/export_coreml.py" "$@" || exit $?
-
 DEST=$("$VENV/bin/python" -c '
 import json, sys, os
 run = sys.argv[1]
 d = json.load(open(os.path.join(run, "run.json")))
 print(os.path.join(sys.argv[2], "models", "wakeword", d["version"], d["train_args"]["run_id"]))
 ' "$RUN" "$ROOT") || exit $?
+
+# An archive that records a commit is a record of a past export. Refuse before anything is written.
+if [ -f "$DEST/export.json" ] && "$VENV/bin/python" -c '
+import json, sys
+commit = json.load(open(sys.argv[1])).get("git_commit")
+sys.exit(0 if commit not in (None, "UNCOMMITTED") else 1)
+' "$DEST/export.json"; then
+    echo "refusing: $DEST already holds an export made from a commit; delete that folder to re-export" >&2
+    exit 1
+fi
+
+"$VENV/bin/python" "$HERE/python/export_coreml.py" "$@" || exit $?
 
 mkdir -p "$DEST"
 cp "$RUN/run.json" "$DEST/run.json" || exit $?
