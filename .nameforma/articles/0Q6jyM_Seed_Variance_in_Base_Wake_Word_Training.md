@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 0Q6jyMMM00D3Ywo0oukl7W
 collection: world
-title: Seed Variance in Base Wake Word Training
+title: "0Q6jyM_Seed_Variance_in_Base_Wake_Word_Training"
 description: Seed 1-20 results for the base WakeNet on the current train.py, with seed 15 as the export candidate, plus earlier noise comparisons
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---

@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 0Q6on6MZ00jW7Mm7iDk6NW
 collection: world
-title: Live Wake Word Test in the Training Wizard
+title: "0Q6on6_Live_Wake_Word_Test_in_the_Training_Wizard"
 description: Plan for a live matcher inside the iPad training wizard, showing the running score while positives are recorded
 ---
 

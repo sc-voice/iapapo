@@ -1,3 +1,10 @@
+---
+type: nameforma.md
+zuid: 0Q6eaN_q00DCQRP4tGFJNW
+collection: world
+title: "0Q6eaN_Analysis_of_CNN_Suitability_for_Wakeword_Recognition"
+---
+
 # Analysis of CNN Suitability for Wakeword Recognition
 
 ## Overview

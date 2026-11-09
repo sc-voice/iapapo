@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 0Q6OyMU100yPmDYh5WNYtW
 collection: world
-title: Wake Word Training from the Latest Samples
+title: "0Q6OyM_Wake_Word_Training_from_the_Latest_Samples"
 description: Design for a first IaPapo wake-word model trained on the clips from the Training Wizard's latest take
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---

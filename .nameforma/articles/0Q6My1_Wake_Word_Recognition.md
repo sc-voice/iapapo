@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 0Q6My1bn00B6S0Bm_cAcdW
 collection: world
-title: Wake Word Recognition
+title: "0Q6My1_Wake_Word_Recognition"
 description: Options for recognizing the IaPapo wake word to drive IDLE to LISTENING
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---
