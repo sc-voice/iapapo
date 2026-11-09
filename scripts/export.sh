@@ -37,11 +37,14 @@ cp "$RUN/scores.csv" "$DEST/scores.csv" || exit $?
 cp "$RUN/run.log" "$DEST/run.log" || exit $?
 cp "$RUN/train.json" "$DEST/train.json" || exit $?
 NFHASH=$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/export_coreml.py") || exit $?
+# The commit the export code came from, or UNCOMMITTED if scripts/ has changes not in HEAD.
+GIT_COMMIT=$(cd "$ROOT" && git status --porcelain -- scripts | grep -q . && echo UNCOMMITTED || git rev-parse HEAD 2>/dev/null || echo UNCOMMITTED)
 "$VENV/bin/python" -c '
 import json, sys
-src, dst, nfhash = sys.argv[1], sys.argv[2], sys.argv[3]
+src, dst, nfhash, commit = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 d = json.load(open(src))
 d["export_coreml_nfhash"] = nfhash
+d["git_commit"] = commit
 json.dump(d, open(dst, "w"), indent=2)
-' "$RUN/export.json" "$DEST/export.json" "$NFHASH" || exit $?
+' "$RUN/export.json" "$DEST/export.json" "$NFHASH" "$GIT_COMMIT" || exit $?
 echo "archived: $DEST"

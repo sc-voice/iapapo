@@ -21,5 +21,6 @@
   "compute_precision": "float32",
   "coremltools": "9.0",
   "torch": "2.7.0",
-  "export_coreml_nfhash": "t1QNCEw63WzRJwzryg1_1-CGra5ILgD11w_qhMHgAgy"
+  "export_coreml_nfhash": "t1QNCEw63WzRJwzryg1_1-CGra5ILgD11w_qhMHgAgy",
+  "git_commit": "UNCOMMITTED"
 }
