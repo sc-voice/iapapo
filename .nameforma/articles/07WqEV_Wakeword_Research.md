@@ -1,8 +1,8 @@
 ---
 type: nameforma.md
-zuid: 0Q714zzN00K2ZTSEXafvdW
+zuid: 07WqEVFnlDiApKhTb0c0Wt
 collection: world
-title: "0Q714z_Wakeword_Research"
+title: "07WqEV_Wakeword_Research"
 description: How the IaPapo wake-word design was reached: options, the CNN analysis, and the base-model seed sweep
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---
@@ -81,7 +81,7 @@ The earlier sweeps used `train.py` versions `dkQlX-bLy`, `uyH5DWIyZ` and `0Q6jON
 - Acoustic keyword spotting, with a self-trained WakeNet, exported to Core ML.
 - Everything runs on device; recordings and models stay local.
 - Base model trained on synthetic voices. On-device customization is the threshold only.
-- Export seed is chosen by sweep on each `train.py` version. Current export: seed 5 (`0Q6-ou`).
+- Export seed is chosen by sweep on each `train.py` version. Current export: seed 5 (`0Q6-ou`). Its perfect fit to the training clips is in-sample; on the three held-out takes at 0.5 it has 3 false triggers out of 10 negatives (0 at 0.8). Held-out results are in [[0Q714-2F00TtWRuz61JxtW]].
 - Threshold: 0.5 for the base-model comparison across runs; 0.8 for the tuned wakeword setting (see [[0Q714-2F00TtWRuz61JxtW]]).
 
 ## Open issues

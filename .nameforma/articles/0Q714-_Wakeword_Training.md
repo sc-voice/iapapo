@@ -9,7 +9,7 @@ agent_instructions: Maintain synchronous awareness without a persistent urge to 
 
 ## Overview
 
-This is the operational article for the IaPapo wake word: how a model is trained from the Training Wizard's clips, how it is exported and checked, and what runs next. For the design history, see [[0Q714zzN00K2ZTSEXafvdW]] (Wakeword Research).
+This is the operational article for the IaPapo wake word: how a model is trained from the Training Wizard's clips, how it is exported and checked, and what runs next. For the design history, see [[07WqEVFnlDiApKhTb0c0Wt]] (Wakeword Research).
 
 The current model is `0Q6-ou`: seed 5 of the `JNaU8v4L6` sweep, exported to Core ML.
 
