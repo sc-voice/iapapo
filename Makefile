@@ -15,6 +15,11 @@ build-app:
 build-core:
 	swift build --package-path VACore
 
+# Compiles the lab wake-word model into VACore's resources. The output is a build artifact, kept out of git.
+build-model:
+	mkdir -p VACore/Sources/VACore/Resources
+	xcrun coremlcompiler compile lab/wakeword/out/JNaU8v4L6/no-take-0Q6-ou/wakenet.mlpackage VACore/Sources/VACore/Resources
+
 # Restore the checkout to "as if new": remove generated and per-user state.
 # Leaves local/ and .nameforma logs alone.
 clean-all: clean-core clean-app
@@ -33,6 +38,7 @@ help:
 	@echo ""
 	@echo "  make build-app    Build VA app for iOS Simulator"
 	@echo "  make build-core   Build VACore package"
+	@echo "  make build-model  Compile the lab wake-word model into VACore resources"
 	@echo "  make clean-all    Clean everything"
 	@echo "  make clean-app    Clean VA app build artifacts"
 	@echo "  make clean-core   Clean VACore build artifacts"
@@ -81,15 +87,18 @@ test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test
 
 test-core:
-	swift test --package-path VACore
+	swift test -c release --package-path VACore --skip showSwiftScores
 
 # Wake-word matcher end to end: its unit tests, Core ML vs PyTorch match on one run, and the
-# Swift front end vs Python features. RUN and TAKE are described at match.
+# Swift front end vs Python features. RUN and TAKE are described at match. Without them, the match
+# step uses the held-out run and take from the wake-word article.
+WAKE_DEFAULT_RUN := lab/wakeword/out/JNaU8v4L6/no-take-0Q6-ou
+WAKE_DEFAULT_TAKE := lab/wakeword/takes/20261104-075505
 test-wakeword:
 	$(PY) scripts/python/tests/test_wakeword_matcher.py
 	$(PY) scripts/python/tests/test_nfhash.py
 	$(PY) scripts/python/tests/test_train_cli.py
-	$(MAKE) match
+	$(MAKE) match RUN="$(or $(RUN),$(WAKE_DEFAULT_RUN))" TAKE="$(or $(TAKE),$(WAKE_DEFAULT_TAKE))"
 	swift test -c release --package-path VACore --filter logMel
 
 wake-base:

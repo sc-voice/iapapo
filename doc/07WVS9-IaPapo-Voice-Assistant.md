@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 07WVS9uFuAQ9uLB4vuKkF2
 collection: world
-title: "07WVS9_IaPapo_Voice_Assistant"
+title: "07WVS9-IaPapo-Voice-Assistant"
 description: Describes voice/chat design for MacOS 27+ and iOS 27+
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---

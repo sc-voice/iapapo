@@ -56,5 +56,8 @@ Thumbs.db
 .nx/migrate-runs
 __pycache__/
 
+# Compiled wake-word model, built by make build-model
+VACore/Sources/VACore/Resources/wakenet.mlmodelc/
+
 # Single Python environment at the repo root (managed by uv from pyproject.toml and uv.lock).
 .venv/

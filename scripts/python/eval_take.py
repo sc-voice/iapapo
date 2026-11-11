@@ -1,11 +1,11 @@
 """Score a take with one trained run and record the result in that run's folder.
 
 Usage:
-    .venv/bin/python scripts/evaluate.py <run folder> <take folder> [--threshold T]
+    .venv/bin/python scripts/python/eval_take.py <run folder> <take folder> [--threshold T]
 
 A clip triggers when any of its windows reaches the threshold (default: the run's threshold).
-Positive clips are trimmed to speech before scoring, as in training. Negative clips are scored
-raw, so a trigger on a negative is a false trigger.
+Clips are scored raw, as live audio is: a take is a live recording, so positives are not trimmed
+to speech. A trigger on a negative is a false trigger.
 
 Writes <run folder>/eval-<eval run_id>.json. The evaluation has its own run_id (from nf id, like a
 training run), and records model_run_id: the run_id of the trained model it tested, from that model's
@@ -60,8 +60,6 @@ def main():
         name = os.path.splitext(os.path.basename(path))[0]
         label = "positive" if name.startswith("positive") else "negative"
         x = train.load_clip(path)
-        if label == "positive":
-            x = train.trim_speech(x)
         _, probs = train.sliding_scores(model, x, window_len)
         peak = float(probs.max())
         clips.append({"clip": name, "label": label, "max_prob": round(peak, 4),
@@ -75,6 +73,7 @@ def main():
     }
     record = {
         "run_id": eval_id,
+        "pipeline": "python",
         "model_run_id": train_args["run_id"],
         "model_run": train.repo_relative(run_dir),
         "take": train.repo_relative(take_dir),

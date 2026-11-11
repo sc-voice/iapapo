@@ -23,12 +23,17 @@ let package = Package(
             name: "transcribe",
             targets: ["transcribe"]
         ),
+        .executable(
+            name: "eval_take",
+            targets: ["eval_take"]
+        ),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "VACore"
+            name: "VACore",
+            resources: [.copy("Resources/wakenet.mlmodelc")]
         ),
         // On-device speech transcription. Kept apart from VACore so VACore has no Speech dependency.
         .target(
@@ -48,6 +53,11 @@ let package = Package(
                     "-Xlinker", "Sources/transcribe/Info.plist",
                 ])
             ]
+        ),
+        // Scores one take with a run's model and writes its eval record, as scripts/python/eval_take.py does.
+        .executableTarget(
+            name: "eval_take",
+            dependencies: ["VACore"]
         ),
         .testTarget(
             name: "VACoreSpeechTests",

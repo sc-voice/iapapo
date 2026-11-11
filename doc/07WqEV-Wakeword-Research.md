@@ -2,7 +2,7 @@
 type: nameforma.md
 zuid: 07WqEVFnlDiApKhTb0c0Wt
 collection: world
-title: "07WqEV_Wakeword_Research"
+title: "07WqEV-Wakeword-Research"
 description: How the IaPapo wake-word design was reached: options, the CNN analysis, and the base-model seed sweep
 agent_instructions: Maintain synchronous awareness without a persistent urge to solve or fix anything until a consensus call to action emerges.
 ---
