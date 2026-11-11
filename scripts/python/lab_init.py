@@ -6,6 +6,7 @@ Usage: scripts/lab_init.sh <run id>
 Finds the one archive record models/wakeword/<version>/<run id>/run.json and checks that every
 training input under media/ still has the hash recorded in it. It then fills lab/wakeword/noise/
 with the noise clips that run used, copied from media/noise/, and checks each copy's hash.
+It first creates the empty lab/ folders that the tests read, if they are missing.
 
 Nothing is copied unless every check passes. The script stops with a message if a file is missing,
 a hash differs, or lab/wakeword/noise/ holds a WAV that the run did not use, since train.py would
@@ -70,6 +71,24 @@ def check(record):
     return problems
 
 
+LAB_FOLDERS = [
+    ("lab", "wakeword", "noise"),
+    ("lab", "wakeword", "takes"),
+    ("lab", "wakeword", "reference", "frontend"),
+    ("lab", "wakeword", "reference", "resample"),
+    ("lab", "wakeword", "monitor"),
+]
+
+
+def ensure_folders():
+    """Create the lab folders the tests and scripts read, if they are missing.
+
+    Empty folders are not copies, so this runs before the checks.
+    """
+    for parts in LAB_FOLDERS:
+        os.makedirs(os.path.join(ROOT, *parts), exist_ok=True)
+
+
 def fill_noise(record):
     """Copy the run's noise clips from media/noise/ into lab/wakeword/noise/ and verify each copy.
 
@@ -77,7 +96,6 @@ def fill_noise(record):
         record: parsed run.json.
     """
     dest_dir = os.path.join(ROOT, "lab", "wakeword", "noise")
-    os.makedirs(dest_dir, exist_ok=True)
     for name, expected in record["noise_nfhash"].items():
         dest = os.path.join(dest_dir, name)
         shutil.copyfile(os.path.join(ROOT, "media", "noise", name), dest)
@@ -92,6 +110,7 @@ def main(argv):
     Args:
         argv: command-line arguments, excluding the program name.
     """
+    ensure_folders()
     if len(argv) != 1:
         sys.exit("usage: scripts/lab_init.sh <run id>")
     path = find_record(argv[0])

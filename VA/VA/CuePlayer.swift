@@ -15,7 +15,6 @@ final class CuePlayer: Feedback {
     /// The most recent cue, kept so its name can fade out after it stops.
     private(set) var lastCue: Sound?
     private var player: AVAudioPlayer?
-    private var fadeTask: Task<Void, Never>?
     private let log: EventLog
 
     init(log: EventLog) {
@@ -24,30 +23,27 @@ final class CuePlayer: Feedback {
 
     func perform(_ effect: Effect) {
         guard case .sound(let sound) = effect else { return }
-        play(sound)
+        PlaybackQueue.shared.enqueue { [weak self] in
+            await self?.play(sound)
+        }
     }
 
-    /// Returns when the cue started by the latest `perform` has finished, or at once if none is playing.
+    /// Returns when every cue queued so far has finished, or at once if none is playing.
     func untilSilent() async {
-        await fadeTask?.value
+        await PlaybackQueue.shared.untilIdle()
     }
 
-    private func play(_ sound: Sound) {
+    /// Plays one cue and returns when it has finished. Runs only from the `PlaybackQueue`.
+    private func play(_ sound: Sound) async {
         guard let url = Bundle.main.url(forResource: sound.resourceName, withExtension: "m4a"),
               let player = try? AVAudioPlayer(contentsOf: url) else { return }
-        let duration = player.duration
         self.player = player
         player.play()
         nowPlaying = sound
         lastCue = sound
         log.record("cue \(sound.resourceName)")
-        fadeTask?.cancel()
-        fadeTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(duration))
-            if !Task.isCancelled {
-                self?.nowPlaying = nil
-            }
-        }
+        try? await Task.sleep(for: .seconds(player.duration))
+        nowPlaying = nil
     }
 }
 

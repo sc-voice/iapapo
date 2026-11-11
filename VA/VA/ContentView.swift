@@ -137,6 +137,7 @@ struct ContentView: View {
             }
         }
         let step = result.step
+        log.record("state \(chatState) -> \(step.state)")
         chatState = step.state
         if step.state == .inactive {
             microphone.stop()
@@ -324,8 +325,11 @@ struct DeveloperView: View {
     private var samplesSection: some View {
         Section("Wake Word") {
             Button("Train IaPapo") {
-                cues.perform(.sound(.trainIapapo))
-                showWizard = true
+                // Open the wizard only when entering IDLE is allowed. A blocked entry shows its own sheet or alert,
+                // and presenting both sheets at once would dismiss the wizard.
+                let availability = Availability(microphone: !microphone.isDenied, speech: speech.availability)
+                showWizard = entryBlock(for: .idle, availability: availability) == nil
+                onSelect(.idle)
             }
                 .sheet(isPresented: $showWizard) {
                     TrainingWizard(

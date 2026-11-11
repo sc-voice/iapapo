@@ -23,6 +23,8 @@ final class EventLog {
     private let limit = 200
 
     func record(_ text: String) {
+        // print always reaches the Xcode console; os.Logger messages can be dropped there.
+        print("[VA] \(text)")
         count += 1
         entries.append(LogEntry(sequence: count, time: .now, text: text))
         if entries.count > limit {

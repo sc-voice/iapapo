@@ -36,7 +36,7 @@ private func split(_ x: [Float], size: Int) -> [[Float]] {
     let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
-    let url = repo.appendingPathComponent("lab/wakeword/takes/20261104-075505/negative-001.wav")
+    let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
     let streamer = try WAVStreamer(url: url)
     let expected = ArrayResampler48To16().resample(streamer.samples)
 

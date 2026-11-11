@@ -5,6 +5,8 @@ import Foundation
 public enum WakeScorerError: Error {
     /// The model returned no `prob` output.
     case missingProbability
+    /// The package has no bundled `wakenet.mlmodelc`. Run `make build-model`.
+    case missingBundledModel
 }
 
 /// Scores 48 kHz audio with the wake-word Core ML model, through the same chain as live audio:
@@ -18,6 +20,15 @@ public struct WakeScorer {
     /// - Parameter model: a loaded `wakenet.mlpackage` with input `logmel` and output `prob`.
     public init(model: MLModel) {
         self.model = model
+    }
+
+    /// Loads the compiled model bundled as a VACore resource (see `make build-model`).
+    /// - Returns: a scorer for the bundled model.
+    public static func loadBundled() throws -> WakeScorer {
+        guard let url = Bundle.module.url(forResource: "wakenet", withExtension: "mlmodelc") else {
+            throw WakeScorerError.missingBundledModel
+        }
+        return WakeScorer(model: try MLModel(contentsOf: url))
     }
 
     /// Compiles and loads the `wakenet.mlpackage` in a run folder.

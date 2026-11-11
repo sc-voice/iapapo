@@ -33,6 +33,10 @@ clean-app:
 clean-core:
 	swift package --package-path VACore clean
 
+# Applies .swiftformat (2-space indent, 80 columns, LF) to the app and core sources.
+format:
+	swiftformat VA/VA VACore/Sources VACore/Tests
+
 help:
 	@echo "IaPapo Build Targets"
 	@echo ""
@@ -42,6 +46,7 @@ help:
 	@echo "  make clean-all    Clean everything"
 	@echo "  make clean-app    Clean VA app build artifacts"
 	@echo "  make clean-core   Clean VACore build artifacts"
+	@echo "  make format       Apply .swiftformat to the app and core Swift sources"
 	@echo "  make help         Show this list"
 	@echo "  make install      Check Xcode/macOS versions, build the Python env, resolve Swift packages"
 	@echo "  make export       Core ML export of a wake-word run (RUN=<run folder>)"
@@ -87,7 +92,7 @@ test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test
 
 test-core:
-	swift test -c release --package-path VACore --skip showSwiftScores
+	swift test -c release --package-path VACore --skip showSwiftScores --skip scoreFromWAVMatchesPythonEval --skip wakeScoresMatchPythonEval --skip logMelMatchesPython --skip frontEndFromWAVMatchesPython --skip arrayResamplerMatchesScipy
 
 # Wake-word matcher end to end: its unit tests, Core ML vs PyTorch match on one run, and the
 # Swift front end vs Python features. RUN and TAKE are described at match. Without them, the match
@@ -99,7 +104,7 @@ test-wakeword:
 	$(PY) scripts/python/tests/test_nfhash.py
 	$(PY) scripts/python/tests/test_train_cli.py
 	$(MAKE) match RUN="$(or $(RUN),$(WAKE_DEFAULT_RUN))" TAKE="$(or $(TAKE),$(WAKE_DEFAULT_TAKE))"
-	swift test -c release --package-path VACore --filter logMel
+	swift test -c release --package-path VACore --filter 'scoreFromWAVMatchesPythonEval|wakeScoresMatchPythonEval|logMelMatchesPython|frontEndFromWAVMatchesPython|arrayResamplerMatchesScipy'
 
 wake-base:
 	scripts/train.sh $(ARGS)

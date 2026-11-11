@@ -28,10 +28,10 @@ private func checkWindows(_ windows: [[Float]], of stream: [Float], label: Strin
     let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
-    let url = repo.appendingPathComponent("lab/wakeword/takes/20261104-075505/negative-001.wav")
+    let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
     let streamer = try WAVStreamer(url: url)
     let stream = ArrayResampler48To16().resample(streamer.samples)
-    #expect(completeWindows(stream.count) == 16)
+    #expect(completeWindows(stream.count) == 8)
 
     for size in [4000, 977, 1, 4096] {
         var window = SlidingWindow()
@@ -49,7 +49,7 @@ private func checkWindows(_ windows: [[Float]], of stream: [Float], label: Strin
     let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
-    let url = repo.appendingPathComponent("lab/wakeword/takes/20261104-075505/negative-001.wav")
+    let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
     let streamer = try WAVStreamer(url: url)
 
     var resampler = Resampler48To16()

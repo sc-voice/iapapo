@@ -15,6 +15,46 @@ struct TrainingStep: Identifiable {
     let matchPrompt: Bool
     /// The longest the clip can run, in milliseconds.
     let msTimeout: Int
+    /// When true, the panel only shows the live mic level and records nothing; `label`, `text`, and the timing fields are ignored.
+    var monitorOnly: Bool = false
+    /// Bundled audio file played when the panel appears, such as `assistant.m4a`. Nil stays silent.
+    var cue: String? = nil
+}
+
+/// Shows the live mic level so the user can check the microphone. Records no clip.
+private struct MicMonitorView: View {
+    let microphoneOn: Bool
+    /// Live mic level in dBFS, drawn as the meter.
+    let level: Float
+    /// Spoken once on entry, when set.
+    let cue: String?
+    let onNext: () -> Void
+
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Check your microphone")
+                .font(.headline)
+            Text(microphoneOn 
+                ? "Speak normally. The meter follows the room. Nothing is recorded here." 
+                : "The microphone is off."
+            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            ProgressView(value: min(max((level + 60) / 60, 0), 1))
+                .frame(width: 200)
+            Button("Next", action: onNext)
+                .buttonStyle(.borderedProminent)
+                .disabled(!microphoneOn)
+        }
+        .onAppear {
+            guard let cue else { return }
+            PlaybackQueue.shared.enqueue {
+                await ClipPlayer.play(cue)
+            }
+        }
+    }
 }
 
 /// Guides the user through wake-word samples: the wake word in three intonations, then long
@@ -33,14 +73,15 @@ struct TrainingWizard: View {
     let onEndClip: (Bool) -> Bool
     let onDone: () -> Void
 
-    /// We train negatives first to warm up the speaker. WakeWord positives come last.
+    /// The mic check comes first. We train negatives next to warm up the speaker. WakeWord positives come last.
     static let steps: [TrainingStep] = [
-        TrainingStep(id: 0, label: .negative, text: "We are testing the microphone", matchPrompt: true, msTimeout: 10_000),
-        TrainingStep(id: 1, label: .negative, text: "I love Iowa Popovers. Do you have a recipe?", matchPrompt: true, msTimeout: 10_000),
-        TrainingStep(id: 2, label: .negative, text: "I am really worried about the weather tomorrow. What's the forecast?", matchPrompt: true, msTimeout: 10_000),
-        TrainingStep(id: 3, label: .positive, text: "IaPapo", matchPrompt: false, msTimeout: 2_000),
-        TrainingStep(id: 4, label: .positive, text: "IAPAPO!", matchPrompt: false, msTimeout: 2_000),
-        TrainingStep(id: 5, label: .positive, text: "IaPapo?", matchPrompt: false, msTimeout: 2_000),
+        TrainingStep(id: 0, label: .negative, text: "", matchPrompt: false, msTimeout: 0, monitorOnly: true, cue: "assistant.m4a"),
+        TrainingStep(id: 1, label: .negative, text: "We are testing the microphone", matchPrompt: true, msTimeout: 10_000),
+        TrainingStep(id: 2, label: .negative, text: "I love Iowa Popovers. Do you have a recipe?", matchPrompt: true, msTimeout: 10_000),
+        TrainingStep(id: 3, label: .negative, text: "I am really worried about the weather tomorrow. What's the forecast?", matchPrompt: true, msTimeout: 10_000),
+        TrainingStep(id: 4, label: .positive, text: "IaPapo", matchPrompt: false, msTimeout: 2_000),
+        TrainingStep(id: 5, label: .positive, text: "IAPAPO!", matchPrompt: false, msTimeout: 2_000),
+        TrainingStep(id: 6, label: .positive, text: "IaPapo?", matchPrompt: false, msTimeout: 2_000),
     ]
 
     @State private var index = 0
@@ -51,7 +92,15 @@ struct TrainingWizard: View {
         VStack(spacing: 0) {
             titleBar
             VStack(spacing: 16) {
-                if index < Self.steps.count {
+                if index < Self.steps.count, Self.steps[index].monitorOnly {
+                    MicMonitorView(
+                        microphoneOn: microphoneOn,
+                        level: level,
+                        cue: Self.steps[index].cue,
+                        onNext: { index += 1 }
+                    )
+                    .id(index)
+                } else if index < Self.steps.count {
                     AudioSampleView(
                         step: Self.steps[index],
                         microphoneOn: microphoneOn,
