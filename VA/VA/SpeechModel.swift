@@ -125,7 +125,7 @@ final class SpeechModel {
     guard let format = await SpeechAnalyzer
       .bestAvailableAudioFormat(compatibleWith: [transcriber])
     else {
-      log.record("speech: no audio format for \(locale.identifier)")
+      log.info("speech: no audio format for \(locale.identifier)")
       return
     }
     let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
@@ -147,14 +147,14 @@ final class SpeechModel {
           }
         }
       } catch {
-        self?.log.record("speech results error: \(error.localizedDescription)")
+        self?.log.info("speech results error: \(error.localizedDescription)")
       }
     }
     do {
       try await analyzer.start(inputSequence: stream)
-      log.record("speech started")
+      log.info("speech started")
     } catch {
-      log.record("speech start error: \(error.localizedDescription)")
+      log.info("speech start error: \(error.localizedDescription)")
     }
   }
 

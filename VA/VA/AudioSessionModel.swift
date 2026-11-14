@@ -73,7 +73,7 @@ final class AudioSessionModel {
         try session.setActive(policy.active)
         isActive = policy.active
         log
-          .record(
+          .info(
             "session \(policy.active ? "activated" : "deactivated"): \(policy.category)",
           )
       }
@@ -81,7 +81,7 @@ final class AudioSessionModel {
       mediaReset = false
     } catch {
       lastError = error.localizedDescription
-      log.record("session error: \(error.localizedDescription)")
+      log.info("session error: \(error.localizedDescription)")
     }
     refresh()
   }
@@ -117,7 +117,7 @@ final class AudioSessionModel {
   /// recover.
   func mediaServicesWereReset() {
     mediaReset = true
-    log.record("media services reset")
+    log.info("media services reset")
     refresh()
   }
 

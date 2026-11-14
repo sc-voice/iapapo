@@ -11,6 +11,8 @@ public enum Sound: Equatable, Sendable {
   case error
   /// Played when the training wizard opens. File: `trainIapapo.m4a`.
   case trainIapapo
+  /// Played when the wake word is heard. File: `assistant.m4a`.
+  case assistant
 }
 
 /// Side effects the app performs after a transition.
@@ -67,7 +69,7 @@ public func transition(from state: VAState, on event: VAEvent) -> Step {
   case (.inactive, .hidOn):
     transition(to: .idle, sound: .on)
   case (.idle, .heardWakeWord):
-    transition(to: .listening)
+    transition(to: .listening, sound: .assistant)
   case (.idle, .hidOff):
     transition(to: .inactive)
   case (.listening, .utterance(.quick)), (.listening, .utterance(.valid)):
@@ -87,7 +89,7 @@ public func transition(from state: VAState, on event: VAEvent) -> Step {
   case (.speaking, .audioFinished):
     transition(to: .listening)
   case (.speaking, .heardWakeWord):
-    transition(to: .listening, before: [.cancelSpeech])
+    transition(to: .listening, sound: .assistant, before: [.cancelSpeech])
   default:
     Step(state: state, effects: [])
   }

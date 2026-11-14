@@ -57,7 +57,7 @@ final class Microphone {
     engine.stop()
     isOn = false
     level = -160
-    log.record("microphone off")
+    log.info("microphone off")
   }
 
   /// RMS level of the first channel in dBFS. Runs on the audio thread, so it
@@ -87,7 +87,7 @@ final class Microphone {
     guard wanted else { return }
     guard granted else {
       wanted = false
-      log.record("microphone denied")
+      log.info("microphone denied")
       return
     }
     let input = engine.inputNode
@@ -105,10 +105,10 @@ final class Microphone {
     do {
       try engine.start()
       isOn = true
-      log.record("microphone on")
+      log.info("microphone on")
     } catch {
       wanted = false
-      log.record("microphone error: \(error.localizedDescription)")
+      log.info("microphone error: \(error.localizedDescription)")
     }
   }
 }

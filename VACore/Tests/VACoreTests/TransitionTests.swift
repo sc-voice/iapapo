@@ -8,7 +8,7 @@ import Testing
 
 @Test func idleHandlesWakeWordAndHIDOff() {
   #expect(transition(from: .idle, on: .heardWakeWord)
-    == Step(state: .listening, effects: [.sound(.listen)]))
+    == Step(state: .listening, effects: [.sound(.assistant)]))
   #expect(transition(from: .idle, on: .hidOff)
     == Step(state: .inactive, effects: [.sound(.off)]))
 }
@@ -47,7 +47,7 @@ import Testing
   #expect(transition(from: .speaking, on: .audioFinished)
     == Step(state: .listening, effects: [.sound(.listen)]))
   #expect(transition(from: .speaking, on: .heardWakeWord)
-    == Step(state: .listening, effects: [.cancelSpeech, .sound(.listen)]))
+    == Step(state: .listening, effects: [.cancelSpeech, .sound(.assistant)]))
 }
 
 @Test func entryToListeningAlwaysGivesFeedback() {
@@ -76,5 +76,5 @@ final class RecordingFeedback: Feedback {
 @Test func wakeWordCuesListeningThroughFeedback() {
   let feedback = RecordingFeedback()
   perform(transition(from: .idle, on: .heardWakeWord), with: feedback)
-  #expect(feedback.effects == [.sound(.listen)])
+  #expect(feedback.effects == [.sound(.assistant)])
 }

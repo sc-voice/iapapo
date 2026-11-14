@@ -66,8 +66,7 @@ struct AudioSampleView: View {
         .font(.title3)
         .multilineTextAlignment(.center)
       if recording {
-        ProgressView(value: min(max((level + 60) / 60, 0), 1))
-          .frame(width: 200)
+        LevelRing(value: Double((level + 60) / 60))
           .transition(.opacity)
         Text("Listening…")
           .font(.caption)

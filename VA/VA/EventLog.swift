@@ -22,7 +22,19 @@ final class EventLog {
   private var count = 0
   private let limit = 200
 
-  func record(_ text: String) {
+  /// Records an ordinary event.
+  /// - Parameter text: the line shown in the log.
+  func info(_ text: String) {
+    append(text)
+  }
+
+  /// Records a problem, marked with a red X.
+  /// - Parameter text: the line shown in the log, after the X.
+  func warn(_ text: String) {
+    append("❌ \(text)")
+  }
+
+  private func append(_ text: String) {
     // print always reaches the Xcode console; os.Logger messages can be dropped
     // there.
     print("[VA] \(text)")

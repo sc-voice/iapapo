@@ -18,6 +18,8 @@ struct ContentView: View {
   @State private var microphone: Microphone
   @State private var speech: SpeechModel
   @State private var recorder: ClipRecorder
+  @State private var wakeScores: WakeScoreModel
+  @State private var wake: WakeFeed
   /// The folder for the current recording session, created on the first sample.
   @State private var take: URL?
   /// The clip being written between `beginClip` and `endClip`, if any.
@@ -37,11 +39,15 @@ struct ContentView: View {
     let speech = SpeechModel(log: log)
     let microphone = Microphone(log: log, session: session)
     let recorder = ClipRecorder(log: log)
-    // Every captured buffer goes to the analyzer and the sample recorder. Both
-    // drop it when idle.
-    microphone.onBuffer = {
-      speech.feed($0)
-      recorder.capture($0)
+    let wakeScores = WakeScoreModel()
+    let wake = WakeFeed(model: wakeScores, log: log)
+    // Every captured buffer goes to the analyzer, the sample recorder and the
+    // wake scorer. Each drops it when idle.
+    microphone.onBuffer = { [weak microphone] buffer in
+      speech.feed(buffer)
+      recorder.capture(buffer)
+      wake.feed(buffer)
+      wakeScores.ringDb = microphone?.level ?? -160
     }
     _log = State(initialValue: log)
     _cues = State(initialValue: CuePlayer(log: log))
@@ -49,6 +55,8 @@ struct ContentView: View {
     _speech = State(initialValue: speech)
     _microphone = State(initialValue: microphone)
     _recorder = State(initialValue: recorder)
+    _wakeScores = State(initialValue: wakeScores)
+    _wake = State(initialValue: wake)
   }
 
   /// Arms the recorder for one clip of `label` in the current take. The clip
@@ -75,7 +83,7 @@ struct ContentView: View {
       recorder.start(writingTo: url, label: label)
       return true
     } catch {
-      log.record("sample error: \(error.localizedDescription)")
+      log.info("sample error: \(error.localizedDescription)")
       return false
     }
   }
@@ -92,11 +100,11 @@ struct ContentView: View {
     guard let url = openClip else { return false }
     openClip = nil
     if keep, reason == nil {
-      log.record("sample saved: \(url.lastPathComponent)")
+      log.info("sample saved: \(url.lastPathComponent)")
       return true
     }
     if let reason {
-      log.record("sample rejected: \(reason)")
+      log.info("sample rejected: \(reason)")
     }
     try? FileManager.default.removeItem(at: url)
     return false
@@ -145,7 +153,7 @@ struct ContentView: View {
       availability: availability,
     )
     if let refused = result.block {
-      log.record("blocked: \(refused)")
+      log.info("blocked: \(refused)")
       if refused == .speechModelNotInstalled {
         pendingState = state
         showDownload = true
@@ -154,11 +162,12 @@ struct ContentView: View {
       }
     }
     let step = result.step
-    log.record("state \(chatState) -> \(step.state)")
+    log.info("state \(chatState) -> \(step.state)")
     chatState = step.state
     if step.state == .inactive {
       microphone.stop()
       speech.stop()
+      wake.stop()
     }
     session.apply(step.state)
     VACore.perform(step, with: cues)
@@ -171,6 +180,7 @@ struct ContentView: View {
       guard chatState == step.state else { return }
       microphone.start()
       speech.start()
+      wake.start()
     }
   }
 
@@ -187,6 +197,7 @@ struct ContentView: View {
           log: log,
           session: session,
           speech: speech,
+          wakeScores: wakeScores,
           prompt: speech.transcript,
           onSelect: enter,
           onBeginClip: beginClip,
@@ -201,7 +212,7 @@ struct ContentView: View {
         .userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
       let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
         .map { String(describing: $0) } ?? "\(raw)"
-      log.record("route change: \(reason)")
+      log.info("route change: \(reason)")
       session.refresh()
     }
     .onReceive(NotificationCenter.default
@@ -211,7 +222,7 @@ struct ContentView: View {
         .userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt ?? 0
       let type = AVAudioSession.InterruptionType(rawValue: raw)
         .map { String(describing: $0) } ?? "\(raw)"
-      log.record("interruption: \(type)")
+      log.info("interruption: \(type)")
       session
         .setInterrupted(AVAudioSession
           .InterruptionType(rawValue: raw) == .began)
@@ -276,6 +287,7 @@ struct DeveloperView: View {
   let log: EventLog
   let session: AudioSessionModel
   let speech: SpeechModel
+  let wakeScores: WakeScoreModel
   let prompt: String
   let onSelect: (VAState) -> Void
   let onBeginClip: (SampleLabel) async -> Bool
@@ -333,6 +345,25 @@ struct DeveloperView: View {
       }
       .frame(maxWidth: .infinity)
     }
+    .blur(radius: showWizard ? 4 : 0)
+    .animation(.default, value: showWizard)
+    .sheet(isPresented: $showWizard) {
+      TrainingWizard(
+        microphoneOn: microphone.isOn,
+        level: microphone.level,
+        wakeScore: wakeScores.shown,
+        ambientDb: wakeScores.ambientDb,
+        micHistory: wakeScores.micHistory,
+        scoreHistory: wakeScores.scoreHistory,
+        transcript: prompt,
+        onEnter: onSelect,
+        onBeginClip: onBeginClip,
+        onEndClip: onEndClip,
+      ) {
+        showWizard = false
+      }
+      .presentationSizing(.fitted)
+    }
   }
 
   private var logSection: some View {
@@ -376,26 +407,17 @@ struct DeveloperView: View {
   private var samplesSection: some View {
     Section("Wake Word") {
       Button("Train IaPapo") {
-        // Open the wizard only when entering IDLE is allowed. A blocked entry
-        // shows its own sheet or alert,
-        // and presenting both sheets at once would dismiss the wizard.
+        // The wizard opens INACTIVE, so only check that IDLE would be allowed.
+        // A blocked entry enters IDLE to show its own sheet or alert instead,
+        // and the wizard stays closed so the two sheets do not collide.
         let availability = Availability(
           microphone: !microphone.isDenied,
           speech: speech.availability,
         )
-        showWizard = entryBlock(for: .idle, availability: availability) == nil
-        onSelect(.idle)
-      }
-      .sheet(isPresented: $showWizard) {
-        TrainingWizard(
-          microphoneOn: microphone.isOn,
-          level: microphone.level,
-          transcript: prompt,
-          onEnter: onSelect,
-          onBeginClip: onBeginClip,
-          onEndClip: onEndClip,
-        ) {
-          showWizard = false
+        if entryBlock(for: .idle, availability: availability) == nil {
+          showWizard = true
+        } else {
+          onSelect(.idle)
         }
       }
     }

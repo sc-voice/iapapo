@@ -47,7 +47,7 @@ final class CuePlayer: Feedback {
     player.play()
     nowPlaying = sound
     lastCue = sound
-    log.record("cue \(sound.resourceName)")
+    log.info("cue \(sound.resourceName)")
     try? await Task.sleep(for: .seconds(player.duration))
     nowPlaying = nil
   }

@@ -59,6 +59,10 @@ public func transition(
   -> (step: Step, block: EntryBlock?)
 {
   guard let block = entryBlock(for: state, availability: availability) else {
+    // Re-entering the current state changes nothing, so it plays no cue.
+    if state == current {
+      return (Step(state: current, effects: []), nil)
+    }
     return (transition(to: state), nil)
   }
   let sound: Sound = block == .speechModelNotInstalled ? .attention : .error

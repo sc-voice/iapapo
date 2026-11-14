@@ -15,6 +15,8 @@ public struct SlidingWindow: Sendable {
   /// Samples between window starts at 16 kHz (0.25 s).
   public static let step = 4000
 
+  /// Samples between window starts for this stream.
+  private let step: Int
   /// Samples from absolute index `bufferStart` onward.
   private var buffer: [Float] = []
   private var bufferStart = 0
@@ -23,7 +25,11 @@ public struct SlidingWindow: Sendable {
   /// Windows emitted so far. The next window starts at `step * emitted`.
   private var emitted = 0
 
-  public init() {}
+  /// - Parameter step: samples between window starts; the training grid by
+  /// default.
+  public init(step: Int = SlidingWindow.step) {
+    self.step = step
+  }
 
   /// Adds samples to the stream.
   /// - Returns: each window completed by these samples, in order, possibly
@@ -32,12 +38,12 @@ public struct SlidingWindow: Sendable {
     buffer += samples
     received += samples.count
     var windows: [[Float]] = []
-    while Self.step * emitted + Self.length <= received {
-      let start = Self.step * emitted - bufferStart
+    while step * emitted + Self.length <= received {
+      let start = step * emitted - bufferStart
       windows.append(Array(buffer[start ..< (start + Self.length)]))
       emitted += 1
     }
-    let keepFrom = Self.step * emitted
+    let keepFrom = step * emitted
     let drop = min(max(0, keepFrom - bufferStart), buffer.count)
     buffer.removeFirst(drop)
     bufferStart += drop

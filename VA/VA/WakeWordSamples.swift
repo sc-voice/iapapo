@@ -281,7 +281,7 @@ final class ClipRecorder {
       }
       try file?.write(from: buffer)
     } catch {
-      log.record("clip write error: \(error.localizedDescription)")
+      log.info("clip write error: \(error.localizedDescription)")
     }
   }
 }

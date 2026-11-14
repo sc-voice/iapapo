@@ -19,9 +19,6 @@ struct TrainingStep: Identifiable {
   /// When true, the panel only shows the live mic level and records nothing;
   /// `label`, `text`, and the timing fields are ignored.
   var monitorOnly: Bool = false
-  /// Bundled audio file played when the panel appears, such as `assistant.m4a`.
-  /// Nil stays silent.
-  var cue: String?
 }
 
 /// Shows the live mic level so the user can check the microphone. Records no
@@ -30,31 +27,95 @@ private struct MicMonitorView: View {
   let microphoneOn: Bool
   /// Live mic level in dBFS, drawn as the meter.
   let level: Float
-  /// Spoken once on entry, when set.
-  let cue: String?
+  /// Smoothed wake-word score, from 0 to 1, drawn as the score ring.
+  let wakeScore: Float
+  /// Ambient floor in dBFS, or nil before the first hop.
+  let ambientDb: Float?
+  /// Microphone level in dBFS per event, newest first, for the history chart.
+  let micHistory: [Float]
+  /// Raw wake score per event, newest first, for the history chart.
+  let scoreHistory: [Float]
   let onNext: () -> Void
+  /// Toggles the microphone: enters IDLE to start it, or INACTIVE to stop it.
+  let onMicTap: () -> Void
 
   var body: some View {
     VStack(spacing: 16) {
-      Text("Check your microphone")
+      Text(microphoneOn
+        ? "Please say: \"IaPapo\""
+        : "Turn on the microphone")
         .font(.headline)
       Text(microphoneOn
-        ? "Speak normally. The meter follows the room. Nothing is recorded here."
+        ? "I-AH-PAH-POH"
         : "The microphone is off.")
-        .font(.caption)
+        .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
-      ProgressView(value: min(max((level + 60) / 60, 0), 1))
-        .frame(width: 200)
+      HStack(spacing: 32) {
+      VStack(spacing: 4) {
+      LevelRing(
+        value: microphoneOn ? Double((level + 60) / 60) : 0,
+        track: microphoneOn
+          ? Color(.quaternarySystemFill)
+          : Color(red: 0.5, green: 0.5, blue: 0.5),
+        fill: .green
+      )
+      .overlay {
+        Button(action: onMicTap) {
+          Image(systemName: "mic.fill")
+            .font(.title)
+        }
+        .accessibilityLabel(
+          microphoneOn ? "Microphone is on" : "Turn on microphone"
+        )
+      }
+      Text(microphoneOn ? String(format: "Current %.1f dBFS", level) : "Current —")
+        .font(.caption)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+      }
+      VStack(spacing: 4) {
+      LevelRing(value: microphoneOn ? Double(wakeScore) : 0, fill: .green)
+        .background {
+          // The gradient turns through 360 degrees every 4 seconds.
+          TimelineView(.animation) { context in
+            let seconds = context.date.timeIntervalSinceReferenceDate
+            let radians = seconds.truncatingRemainder(dividingBy: 4) / 4
+              * 2 * Double.pi
+            let dx = 0.5 * cos(radians)
+            let dy = 0.5 * sin(radians)
+            Circle()
+              .fill(
+                LinearGradient(
+                  colors: microphoneOn
+                    ? [Color(red: 0, green: 0.39, blue: 0), Color(red: 0.584, green: 0.271, blue: 0.208)]
+                    : [.gray, .gray],
+                  startPoint: UnitPoint(x: 0.5 - dx, y: 0.5 - dy),
+                  endPoint: UnitPoint(x: 0.5 + dx, y: 0.5 + dy)
+                )
+              )
+          }
+        }
+        .overlay {
+          Image(systemName: "ear")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(
+              microphoneOn ? Color(red: 0.5, green: 0.5, blue: 0.74) : Color(white: 0.25)
+            )
+            .frame(width: 36, height: 36)
+        }
+        .accessibilityLabel("Wake word score")
+      Text(ambientDb.map { String(format: "Ambient %.1f dBFS", $0) } ?? "Ambient —")
+        .font(.caption)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+      }
+      }
+      WakeHistoryView(micHistory: micHistory, scoreHistory: scoreHistory)
       Button("Next", action: onNext)
         .buttonStyle(.borderedProminent)
         .disabled(!microphoneOn)
-    }
-    .onAppear {
-      guard let cue else { return }
-      PlaybackQueue.shared.enqueue {
-        await ClipPlayer.play(cue)
-      }
     }
   }
 }
@@ -67,6 +128,14 @@ struct TrainingWizard: View {
   let microphoneOn: Bool
   /// Live mic level in dBFS, drawn as the meter while a clip is open.
   let level: Float
+  /// Smoothed wake-word score, from 0 to 1, drawn on the mic check page.
+  let wakeScore: Float
+  /// Ambient floor in dBFS, shown under the wake score ring, or nil before the first hop.
+  let ambientDb: Float?
+  /// Microphone level in dBFS per event, newest first, for the mic check charts.
+  let micHistory: [Float]
+  /// Raw wake score per event, newest first, for the mic check charts.
+  let scoreHistory: [Float]
   /// Live transcript from the speech model, watched for each step's prompt.
   let transcript: String
   /// Enters a ChatState through the app's state machine.
@@ -89,7 +158,6 @@ struct TrainingWizard: View {
       matchPrompt: false,
       msTimeout: 0,
       monitorOnly: true,
-      cue: "assistant.m4a",
     ),
     TrainingStep(
       id: 1,
@@ -147,8 +215,12 @@ struct TrainingWizard: View {
           MicMonitorView(
             microphoneOn: microphoneOn,
             level: level,
-            cue: Self.steps[index].cue,
+            wakeScore: wakeScore,
+            ambientDb: ambientDb,
+            micHistory: micHistory,
+            scoreHistory: scoreHistory,
             onNext: { index += 1 },
+            onMicTap: { onEnter(microphoneOn ? .inactive : .idle) },
           )
           .id(index)
         } else if index < Self.steps.count {
@@ -173,16 +245,11 @@ struct TrainingWizard: View {
       }
       .padding(32)
     }
+    .frame(minWidth: 350)
     .clipShape(RoundedRectangle(cornerRadius: 16))
-    .overlay(RoundedRectangle(cornerRadius: 16).stroke(
-      .secondary,
-      lineWidth: 1,
-    ))
-    .padding(16)
     .onAppear {
-      // The samples need the mic running, so the chat is IDLE while the wizard
-      // is open.
-      onEnter(.idle)
+      // The wizard opens INACTIVE. The mic panel's button enters IDLE to start the mic.
+      onEnter(.inactive)
     }
     .onDisappear {
       // Covers Done, the close button, and swipe-down. INACTIVE stops the mic.
@@ -215,17 +282,18 @@ struct TrainingWizard: View {
   /// close button on the right.
   /// Has its own background so it reads as a bar above the body.
   private var titleBar: some View {
-    ZStack {
+    VStack {
       let total = Self.steps.count
       let current = min(index + 1, total)
-      Text("\(current)/\(total)")
-        .font(.subheadline)
-        .monospacedDigit()
-        .foregroundStyle(.secondary)
       HStack {
-        Text("Let's train IaPapo")
+        Text("Wake-Word")
           .font(.headline)
           .accessibilityAddTraits(.isHeader)
+        Spacer()
+        Text("\(current)/\(total)")
+          .font(.subheadline)
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
         Spacer()
         Button {
           dismiss()
@@ -234,9 +302,12 @@ struct TrainingWizard: View {
         }
         .accessibilityLabel("Close")
       }
+      Rectangle()
+        .fill(.gray)
+        .frame(height: 1);
     }
-    .padding(.horizontal, 32)
+    .padding(.horizontal, 16)
     .padding(.vertical, 12)
-    .background(Color(.secondarySystemBackground))
+    //.background(Color(.secondarySystemBackground))
   }
 }

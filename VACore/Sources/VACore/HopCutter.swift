@@ -12,10 +12,16 @@ public struct HopCutter: Sendable {
   /// Samples per hop at 16 kHz.
   public static let hopLength = 4000
 
+  /// Samples per hop for this stream.
+  private let hopLength: Int
   /// Samples received but not yet emitted in a hop.
   private var pending: [Float] = []
 
-  public init() {}
+  /// - Parameter hopLength: samples per hop at 16 kHz; the production hop by
+  /// default.
+  public init(hopLength: Int = HopCutter.hopLength) {
+    self.hopLength = hopLength
+  }
 
   /// Adds samples to the stream.
   /// - Returns: each full hop completed by these samples, in order, possibly
@@ -23,9 +29,9 @@ public struct HopCutter: Sendable {
   public mutating func process(_ samples: [Float]) -> [[Float]] {
     pending += samples
     var hops: [[Float]] = []
-    while pending.count >= Self.hopLength {
-      hops.append(Array(pending[0 ..< Self.hopLength]))
-      pending.removeFirst(Self.hopLength)
+    while pending.count >= hopLength {
+      hops.append(Array(pending[0 ..< hopLength]))
+      pending.removeFirst(hopLength)
     }
     return hops
   }
