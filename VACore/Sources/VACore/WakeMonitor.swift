@@ -7,7 +7,7 @@ public struct WakeScore: Sendable, Equatable {
   /// window completes.
   public let probability: Float
   /// Index of the most recent completed window, or -1 before the first window.
-  /// Window `k` covers samples `[strideK, strideK + 14287)`.
+  /// Window `k` covers samples `[strideK, strideK + window length)`.
   public let windowIndex: Int
   /// Stream time in seconds at which this stride ended.
   public let endSeconds: Double
@@ -17,6 +17,8 @@ public struct WakeScore: Sendable, Equatable {
   public let ambientDb: Float?
   /// Whether the gate is open.
   public let gateOpen: Bool
+  /// Whether `probability` is at or above the monitor's wake level.
+  public let wakeWord: Bool
 }
 
 /// Streams 48 kHz audio through the wake-word chain and emits one event per
@@ -38,6 +40,8 @@ public struct WakeMonitor {
   private let scorer: WakeScorer
   /// Samples between window starts at 16 kHz.
   private let stride: Int
+  /// Probability at or above which an event's `wakeWord` is true.
+  private let wakeLevel: Float
   private var resampler = Resampler48To16()
   private var cutter: HopCutter
   private var window: SlidingWindow
@@ -59,21 +63,30 @@ public struct WakeMonitor {
   /// the gate is open; that arrives with the gate logic.
   private var gateOpen = true
 
+  /// Wake level used when the caller does not set one.
+  public static let defaultWakeLevel: Float = 0.9
+
   /// - Parameters:
   ///   - scorer: the scorer whose model and window probability the monitor uses.
   ///   - strideMs: milliseconds between window starts, and between events. Must
   ///   be a positive multiple of 10 ms, the frame period, so frames align across
   ///   strides. Defaults to the training grid's 250 ms (4000 samples).
-  public init(scorer: WakeScorer, strideMs: Int = 250) {
+  ///   - wakeLevel: probability at or above which an event's `wakeWord` is true.
+  public init(
+    scorer: WakeScorer,
+    strideMs: Int = 250,
+    wakeLevel: Float = WakeMonitor.defaultWakeLevel,
+  ) {
     precondition(
       strideMs > 0 && strideMs % 10 == 0,
       "strideMs \(strideMs) must be a positive multiple of 10"
     )
     let stride = strideMs * LogMelFrontEnd.sampleRate / 1000
     self.scorer = scorer
+    self.wakeLevel = wakeLevel
     self.stride = stride
     cutter = HopCutter(hopLength: stride)
-    window = SlidingWindow(step: stride)
+    window = SlidingWindow(length: scorer.windowLength, step: stride)
   }
 
   /// Adds 48 kHz mono samples to the stream.
@@ -115,6 +128,7 @@ public struct WakeMonitor {
       micDb: micDb,
       ambientDb: ambientDb,
       gateOpen: gateOpen,
+      wakeWord: currentProbability >= wakeLevel,
     )
   }
 

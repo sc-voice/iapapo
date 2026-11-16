@@ -125,11 +125,6 @@ func evaluate(
       description: "run.json has no window_len; this run predates the current train.py",
     )
   }
-  guard windowLen == SlidingWindow.length else {
-    throw EvalError(
-      description: "run window_len \(windowLen) is not \(SlidingWindow.length)",
-    )
-  }
   guard let trainArgs =
     (runJSON["train_args"] ?? runJSON["args"]) as? [String: Any],
     let modelRunID = trainArgs["run_id"] as? String,
@@ -148,6 +143,11 @@ func evaluate(
   }
 
   let scorer = try await WakeScorer.load(runFolder: runDir)
+  guard scorer.windowLength == windowLen else {
+    throw EvalError(
+      description: "model window_len \(scorer.windowLength) differs from run.json \(windowLen)",
+    )
+  }
   let takeFiles = try FileManager.default.contentsOfDirectory(
     at: takeDir,
     includingPropertiesForKeys: nil,

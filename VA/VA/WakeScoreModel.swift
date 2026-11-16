@@ -24,8 +24,14 @@ final class WakeScoreModel {
   /// Ambient floor in dBFS from the latest score, nil until the first hop.
   private(set) var ambientDb: Float?
 
-  /// Events kept for the history charts: 20 events, which is 2 s at 100 ms.
-  static let historyCount = 20
+  /// The wake monitor's scoring period, in milliseconds. One event per stride.
+  static let strideMs = 50
+  /// Probability at or above which a stride counts as a wake word.
+  static let wakeLevel = WakeMonitor.defaultWakeLevel
+  /// Span of the history charts, in milliseconds.
+  static let historyMs = 2_000
+  /// Events kept for the history charts, derived from the stride period.
+  static let historyCount = historyMs / strideMs
   /// True when the `VERBOSE` environment variable is set at launch. Turns on
   /// the per-stride wake log in any build configuration.
   static let verbose = ProcessInfo.processInfo.environment["VERBOSE"] != nil
@@ -38,6 +44,20 @@ final class WakeScoreModel {
   var clockStart = Date()
   /// Raw score per event, newest first.
   private(set) var scoreHistory: [Float] = []
+  /// Whether each event was a wake word, newest first, parallel to `scoreHistory`.
+  private(set) var wakeHistory: [Bool] = []
+  /// Whether the latest event was a wake word.
+  private(set) var wakeWord = false
+  /// Consecutive strides that were wake words.
+  @ObservationIgnored private var wakeRun = 0
+  /// Called once each time a run of `wakeRunLength` wake-word strides starts.
+  @ObservationIgnored var onWakeRun: (() -> Void)?
+  /// Strides in a row that count as a recognized wake word.
+  static let wakeRunLength = 4
+  /// When `onWakeRun` last fired, so it fires at most once per cooldown.
+  @ObservationIgnored private var lastWakeRunAt: Date?
+  /// Minimum seconds between calls to `onWakeRun`.
+  static let wakeRunCooldown: TimeInterval = 2
 
   /// Applies one score from `WakeMonitor`.
   /// - Parameter score: the window's probability, levels and gate state.
@@ -47,6 +67,19 @@ final class WakeScoreModel {
     ambientDb = score.ambientDb
     micHistory = Array(([score.micDb] + micHistory).prefix(Self.historyCount))
     scoreHistory = Array(([raw] + scoreHistory).prefix(Self.historyCount))
+    wakeHistory = Array(([score.wakeWord] + wakeHistory).prefix(Self.historyCount))
+    wakeWord = score.wakeWord
+    if score.wakeWord {
+      wakeRun += 1
+      let now = Date()
+      if wakeRun == Self.wakeRunLength,
+         lastWakeRunAt.map({ now.timeIntervalSince($0) >= Self.wakeRunCooldown }) ?? true {
+        lastWakeRunAt = now
+        onWakeRun?()
+      }
+    } else {
+      wakeRun = 0
+    }
     if Self.verbose {
       let ms = Int(Date().timeIntervalSince(clockStart) * 1000)
       print("[VA wake] t \(ms) ring \(String(format: "%.1f", ringDb)) bar \(String(format: "%.1f", score.micDb)) raw \(raw) inferred \(shown)")
@@ -60,6 +93,10 @@ final class WakeScoreModel {
     ambientDb = nil
     micHistory = []
     scoreHistory = []
+    wakeHistory = []
+    wakeWord = false
+    wakeRun = 0
+    lastWakeRunAt = nil
   }
 }
 
@@ -84,8 +121,8 @@ final class WakeFeed {
   private var converter: AVAudioConverter?
   /// Converted samples not yet forming a full stride.
   private var pending: [Float] = []
-  /// One 100 ms stride at 48 kHz, the period `WakeMonitor` scores at.
-  private static let strideSamples = 4_800
+  /// One stride at 48 kHz, the period `WakeMonitor` scores at.
+  private static let strideSamples = 48 * WakeScoreModel.strideMs
 
   /// - Parameters:
   ///   - model: receives each raw score.
@@ -111,7 +148,11 @@ final class WakeFeed {
     let model = model
     let log = log
     task = Task {
-      var monitor = WakeMonitor(scorer: scorer, strideMs: 100)
+      var monitor = WakeMonitor(
+        scorer: scorer,
+        strideMs: WakeScoreModel.strideMs,
+        wakeLevel: WakeScoreModel.wakeLevel,
+      )
       var warnedOverrun = false
       for await chunk in stream {
         do {
@@ -119,7 +160,7 @@ final class WakeFeed {
           let scores = try await monitor.process(chunk)
           // One stride must score within one stride period, or the events lag
           // the audio. Warn once per session.
-          if !warnedOverrun, started.duration(to: .now) > .milliseconds(100) {
+          if !warnedOverrun, started.duration(to: .now) > .milliseconds(WakeScoreModel.strideMs) {
             warnedOverrun = true
             log.warn("wake scoring slower than real time; events will lag")
           }

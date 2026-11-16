@@ -18,6 +18,7 @@ import inspect
 import hashlib
 import json
 import os
+import platform
 import random
 import re
 import subprocess
@@ -434,8 +435,17 @@ def main():
         coremltools_version = pkg_version("coremltools")
     except PackageNotFoundError:
         coremltools_version = None
+    # Machine facts that can change floating-point results: OS, CPU, RAM, and torch's CPU thread count.
+    def sysctl(key):
+        try:
+            return subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
     env = {"python": sys.version.split()[0], "torch": torch.__version__, "numpy": np.__version__,
-           "coremltools": coremltools_version}
+           "coremltools": coremltools_version,
+           "macos": platform.mac_ver()[0] or None, "machine": platform.machine(),
+           "cpu": sysctl("machdep.cpu.brand_string"), "cpu_cores": sysctl("hw.ncpu"),
+           "ram_bytes": sysctl("hw.memsize"), "torch_threads": torch.get_num_threads()}
     # train_args is the train.json record plus the run id, which the readers look up.
     run_args = {**rec, "run_id": args.run_id}
     with open(os.path.join(args.out, "run.json"), "w") as f:

@@ -29,53 +29,25 @@ private struct MicMonitorView: View {
   let level: Float
   /// Smoothed wake-word score, from 0 to 1, drawn as the score ring.
   let wakeScore: Float
+  /// Whether the latest event was a wake word; the score ring is green when true.
+  let wakeWord: Bool
   /// Ambient floor in dBFS, or nil before the first hop.
   let ambientDb: Float?
   /// Microphone level in dBFS per event, newest first, for the history chart.
   let micHistory: [Float]
   /// Raw wake score per event, newest first, for the history chart.
   let scoreHistory: [Float]
+  /// Wake-word flag per event, newest first, parallel to `scoreHistory`.
+  let wakeHistory: [Bool]
   let onNext: () -> Void
   /// Toggles the microphone: enters IDLE to start it, or INACTIVE to stop it.
   let onMicTap: () -> Void
 
-  var body: some View {
-    VStack(spacing: 16) {
-      Text(microphoneOn
-        ? "Please say: \"IaPapo\""
-        : "Turn on the microphone")
-        .font(.headline)
-      Text(microphoneOn
-        ? "I-AH-PAH-POH"
-        : "The microphone is off.")
-        .font(.body)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-      HStack(spacing: 32) {
-      VStack(spacing: 4) {
-      LevelRing(
-        value: microphoneOn ? Double((level + 60) / 60) : 0,
-        track: microphoneOn
-          ? Color(.quaternarySystemFill)
-          : Color(red: 0.5, green: 0.5, blue: 0.5),
-        fill: .green
-      )
-      .overlay {
-        Button(action: onMicTap) {
-          Image(systemName: "mic.fill")
-            .font(.title)
-        }
-        .accessibilityLabel(
-          microphoneOn ? "Microphone is on" : "Turn on microphone"
-        )
-      }
-      Text(microphoneOn ? String(format: "Current %.1f dBFS", level) : "Current —")
-        .font(.caption)
-        .monospacedDigit()
-        .foregroundStyle(.secondary)
-      }
-      VStack(spacing: 4) {
-      LevelRing(value: microphoneOn ? Double(wakeScore) : 0, fill: .green)
+  /// The wake score ring with its ambient reading, shown beside the wake score
+  /// bar chart.
+  private var wakeRing: some View {
+    VStack(spacing: 4) {
+      LevelRing(value: microphoneOn ? Double(wakeScore) : 0, fill: wakeWord ? .green : .gray)
         .background {
           // The gradient turns through 360 degrees every 4 seconds.
           TimelineView(.animation) { context in
@@ -106,13 +78,53 @@ private struct MicMonitorView: View {
             .frame(width: 36, height: 36)
         }
         .accessibilityLabel("Wake word score")
-      Text(ambientDb.map { String(format: "Ambient %.1f dBFS", $0) } ?? "Ambient —")
-        .font(.caption)
-        .monospacedDigit()
+    }
+  }
+
+  /// The mic level ring with its button and current level, shown beside the
+  /// microphone bar chart.
+  private var micRing: some View {
+    VStack(spacing: 4) {
+      LevelRing(
+        value: microphoneOn ? Double((level + 60) / 60) : 0,
+        track: microphoneOn
+          ? Color(.quaternarySystemFill)
+          : Color(red: 0.5, green: 0.5, blue: 0.5),
+        fill: .green
+      )
+      .overlay {
+        Button(action: onMicTap) {
+          Image(systemName: "mic.fill")
+            .font(.title)
+        }
+        .accessibilityLabel(
+          microphoneOn ? "Microphone is on" : "Turn on microphone"
+        )
+      }
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: 16) {
+      Text(microphoneOn
+        ? "Please say: \"IaPapo\""
+        : "Turn on the microphone")
+        .font(.headline)
+      Text(microphoneOn
+        ? "I-AH-PAH-POH"
+        : "The microphone is off.")
+        .font(.body)
         .foregroundStyle(.secondary)
-      }
-      }
-      WakeHistoryView(micHistory: micHistory, scoreHistory: scoreHistory)
+        .multilineTextAlignment(.center)
+      WakeHistoryView(
+        micRing: micRing,
+        wakeRing: wakeRing,
+        micHistory: micHistory,
+        scoreHistory: scoreHistory,
+        wakeHistory: wakeHistory,
+        isOn: microphoneOn,
+        ambientDb: ambientDb
+      )
       Button("Next", action: onNext)
         .buttonStyle(.borderedProminent)
         .disabled(!microphoneOn)
@@ -130,12 +142,16 @@ struct TrainingWizard: View {
   let level: Float
   /// Smoothed wake-word score, from 0 to 1, drawn on the mic check page.
   let wakeScore: Float
+  /// Whether the latest event was a wake word, for the score ring's color.
+  let wakeWord: Bool
   /// Ambient floor in dBFS, shown under the wake score ring, or nil before the first hop.
   let ambientDb: Float?
   /// Microphone level in dBFS per event, newest first, for the mic check charts.
   let micHistory: [Float]
   /// Raw wake score per event, newest first, for the mic check charts.
   let scoreHistory: [Float]
+  /// Wake-word flag per event, newest first, for the mic check charts.
+  let wakeHistory: [Bool]
   /// Live transcript from the speech model, watched for each step's prompt.
   let transcript: String
   /// Enters a ChatState through the app's state machine.
@@ -216,9 +232,11 @@ struct TrainingWizard: View {
             microphoneOn: microphoneOn,
             level: level,
             wakeScore: wakeScore,
+            wakeWord: wakeWord,
             ambientDb: ambientDb,
             micHistory: micHistory,
             scoreHistory: scoreHistory,
+            wakeHistory: wakeHistory,
             onNext: { index += 1 },
             onMicTap: { onEnter(microphoneOn ? .inactive : .idle) },
           )

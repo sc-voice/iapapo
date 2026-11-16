@@ -24,7 +24,7 @@ private func streamed(_ chunks: [[Float]]) -> [Float] {
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let streamer = try WAVStreamer(url: url)
   let expected = ArrayResampler48To16().resample(streamer.samples)
 
@@ -47,7 +47,7 @@ private func streamed(_ chunks: [[Float]]) -> [Float] {
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let full = try WAVStreamer(url: url)
   let odd = WAVStreamer(
     samples: Array(full.samples.prefix(100_001)),

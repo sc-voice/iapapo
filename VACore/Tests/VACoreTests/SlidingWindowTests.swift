@@ -12,11 +12,11 @@ private func split(_ x: [Float], size: Int) -> [[Float]] {
 
 /// Number of complete windows in a stream of `count` samples.
 private func completeWindows(_ count: Int) -> Int {
-  count < SlidingWindow
-    .length ? 0 : (count - SlidingWindow.length) / SlidingWindow.step + 1
+  count < testWindowLength
+    ? 0 : (count - testWindowLength) / SlidingWindow.step + 1
 }
 
-/// Window k must be samples [4000k, 4000k + 14287) of the stream, for every
+/// Window k must be samples [4000k, 4000k + testWindowLength) of the stream, for every
 /// complete window and no others.
 private func checkWindows(
   _ windows: [[Float]],
@@ -30,11 +30,11 @@ private func checkWindows(
   for (k, window) in windows.enumerated() {
     let start = SlidingWindow.step * k
     #expect(
-      window.count == SlidingWindow.length,
+      window.count == testWindowLength,
       "\(label): window \(k) has \(window.count) samples",
     )
     #expect(
-      window == Array(stream[start ..< (start + SlidingWindow.length)]),
+      window == Array(stream[start ..< (start + testWindowLength)]),
       "\(label): window \(k) is not at 4000k",
     )
   }
@@ -48,13 +48,13 @@ private func checkWindows(
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let streamer = try WAVStreamer(url: url)
   let stream = ArrayResampler48To16().resample(streamer.samples)
   #expect(completeWindows(stream.count) == 8)
 
   for size in [4000, 977, 1, 4096] {
-    var window = SlidingWindow()
+    var window = SlidingWindow(length: testWindowLength)
     var windows: [[Float]] = []
     for chunk in split(stream, size: size) {
       windows += window.process(chunk)
@@ -70,12 +70,12 @@ private func checkWindows(
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let streamer = try WAVStreamer(url: url)
 
   var resampler = Resampler48To16()
   var cutter = HopCutter()
-  var window = SlidingWindow()
+  var window = SlidingWindow(length: testWindowLength)
   var glued: [Float] = []
   var windows: [[Float]] = []
   for chunk in streamer.chunks(size: 4096) {

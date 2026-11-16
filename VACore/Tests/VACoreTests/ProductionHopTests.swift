@@ -4,8 +4,8 @@ import Testing
 
 /// Complete windows in `count` 16 kHz samples at `step` spacing.
 private func completeWindows(_ count: Int, step: Int) -> Int {
-  count < SlidingWindow.length
-    ? 0 : (count - SlidingWindow.length) / step + 1
+  count < testWindowLength
+    ? 0 : (count - testWindowLength) / step + 1
 }
 
 /// Scores `Ava_premium_hello.m4a` through the full chain at one hop size. Each
@@ -20,7 +20,7 @@ private func scoreAtHop(_ step: Int) async throws
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let scorer = try WakeScorer.loadBundled()
   let streamer = try WAVStreamer(url: url)
 
@@ -28,7 +28,7 @@ private func scoreAtHop(_ step: Int) async throws
   let wallStart = clock.now
   var resampler = Resampler48To16()
   var cutter = HopCutter(hopLength: step)
-  var window = SlidingWindow(step: step)
+  var window = SlidingWindow(length: testWindowLength, step: step)
   var windows: [[Float]] = []
   for chunk in streamer.chunks(size: 3 * step) {
     for hop in cutter.process(resampler.process(chunk)) {
@@ -48,7 +48,7 @@ private func scoreAtHop(_ step: Int) async throws
     windows.count == expected,
     "step \(step): scored \(windows.count) windows, expected \(expected)",
   )
-  #expect(windows.allSatisfy { $0.count == SlidingWindow.length })
+  #expect(windows.allSatisfy { $0.count == testWindowLength })
 
   var maxProb: Float = 0
   var inference = Duration.zero

@@ -38,7 +38,7 @@ private func readFloats(_ url: URL) throws -> [Float] {
   let frames = try #require(manifest?["frames"] as? Int)
   let nMels = try #require(manifest?["n_mels"] as? Int)
   let windowLen = try #require(manifest?["window_len"] as? Int)
-  #expect(windowLen == SlidingWindow.length)
+  #expect(windowLen == testWindowLength)
   let clipWindows = clips.prefix { $0 == "negative-001" }.count
 
   let audio = try readFloats(dir.appendingPathComponent("windows.f32"))
@@ -47,7 +47,7 @@ private func readFloats(_ url: URL) throws -> [Float] {
   let streamer = try WAVStreamer(url: url)
   var resampler = Resampler48To16()
   var cutter = HopCutter()
-  var window = SlidingWindow()
+  var window = SlidingWindow(length: testWindowLength)
   var windows: [[Float]] = []
   for chunk in streamer.chunks(size: 4096) {
     for hop in cutter.process(resampler.process(chunk)) {

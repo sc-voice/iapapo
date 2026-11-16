@@ -10,7 +10,7 @@ private func monitorScores(chunkSize size: Int) async throws -> [WakeScore] {
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let scorer = try WakeScorer.loadBundled()
   let streamer = try WAVStreamer(url: url)
   var monitor = WakeMonitor(scorer: scorer)
@@ -26,8 +26,8 @@ private func monitorScores(chunkSize size: Int) async throws -> [WakeScore] {
 /// the 250 ms default, or -1 before the first window.
 private func latestWindow(atStride i: Int) -> Int {
   let samples = SlidingWindow.step * i
-  return samples >= SlidingWindow.length
-    ? (samples - SlidingWindow.length) / SlidingWindow.step
+  return samples >= testWindowLength
+    ? (samples - testWindowLength) / SlidingWindow.step
     : -1
 }
 
@@ -67,14 +67,14 @@ private func latestWindow(atStride i: Int) -> Int {
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let scorer = try WakeScorer.loadBundled()
 
   // Reference: the direct chain, fed in chunks of 3 × stride at 48 kHz. One
   // entry per stride, from the latest completed window.
   var resampler = Resampler48To16()
   var cutter = HopCutter(hopLength: stride)
-  var window = SlidingWindow(step: stride)
+  var window = SlidingWindow(length: testWindowLength, step: stride)
   var expected: [(probability: Float, windowIndex: Int)] = []
   var current: Float = 0
   var scoredCount = 0
@@ -125,7 +125,7 @@ private func latestWindow(atStride i: Int) -> Int {
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
   let scorer = try WakeScorer.loadBundled()
   var monitor = WakeMonitor(scorer: scorer, strideMs: 100)
   var checked = 0

@@ -20,6 +20,7 @@ struct ContentView: View {
   @State private var recorder: ClipRecorder
   @State private var wakeScores: WakeScoreModel
   @State private var wake: WakeFeed
+  @State private var speaker: Speaker
   /// The folder for the current recording session, created on the first sample.
   @State private var take: URL?
   /// The clip being written between `beginClip` and `endClip`, if any.
@@ -41,6 +42,12 @@ struct ContentView: View {
     let recorder = ClipRecorder(log: log)
     let wakeScores = WakeScoreModel()
     let wake = WakeFeed(model: wakeScores, log: log)
+    let cues = CuePlayer(log: log)
+    let speaker = Speaker(log: log)
+    wakeScores.onWakeRun = {
+      // cues.perform(.sound(.assistant))
+      speaker.say("IaPapo hears you!")
+    }
     // Every captured buffer goes to the analyzer, the sample recorder and the
     // wake scorer. Each drops it when idle.
     microphone.onBuffer = { [weak microphone] buffer in
@@ -50,13 +57,14 @@ struct ContentView: View {
       wakeScores.ringDb = microphone?.level ?? -160
     }
     _log = State(initialValue: log)
-    _cues = State(initialValue: CuePlayer(log: log))
+    _cues = State(initialValue: cues)
     _session = State(initialValue: session)
     _speech = State(initialValue: speech)
     _microphone = State(initialValue: microphone)
     _recorder = State(initialValue: recorder)
     _wakeScores = State(initialValue: wakeScores)
     _wake = State(initialValue: wake)
+    _speaker = State(initialValue: speaker)
   }
 
   /// Arms the recorder for one clip of `label` in the current take. The clip
@@ -198,11 +206,15 @@ struct ContentView: View {
           session: session,
           speech: speech,
           wakeScores: wakeScores,
+          speaker: speaker,
           prompt: speech.transcript,
           onSelect: enter,
           onBeginClip: beginClip,
           onEndClip: endClip,
         )
+      }
+      Tab("Settings", systemImage: "gear") {
+        SettingsView()
       }
     }
     .onReceive(NotificationCenter.default
@@ -288,6 +300,7 @@ struct DeveloperView: View {
   let session: AudioSessionModel
   let speech: SpeechModel
   let wakeScores: WakeScoreModel
+  let speaker: Speaker
   let prompt: String
   let onSelect: (VAState) -> Void
   let onBeginClip: (SampleLabel) async -> Bool
@@ -352,9 +365,11 @@ struct DeveloperView: View {
         microphoneOn: microphone.isOn,
         level: microphone.level,
         wakeScore: wakeScores.shown,
+        wakeWord: wakeScores.wakeWord,
         ambientDb: wakeScores.ambientDb,
         micHistory: wakeScores.micHistory,
         scoreHistory: wakeScores.scoreHistory,
+        wakeHistory: wakeScores.wakeHistory,
         transcript: prompt,
         onEnter: onSelect,
         onBeginClip: onBeginClip,

@@ -7,6 +7,8 @@ public enum WakeScorerError: Error {
   case missingProbability
   /// The package has no bundled `wakenet.mlmodelc`. Run `make build-model`.
   case missingBundledModel
+  /// The model's user metadata has no valid `window_len`. Re-export the model.
+  case missingWindowLength
 }
 
 /// Scores 48 kHz audio with the wake-word Core ML model, through the same chain
@@ -19,11 +21,19 @@ public enum WakeScorerError: Error {
 public struct WakeScorer {
   private let model: MLModel
   private let frontEnd = LogMelFrontEnd()
+  /// Samples per 16 kHz window, read from the model's `window_len` metadata.
+  public let windowLength: Int
 
-  /// - Parameter model: a loaded `wakenet.mlpackage` with input `logmel` and
-  /// output `prob`.
-  public init(model: MLModel) {
+  /// - Parameter model: a loaded `wakenet.mlpackage` with input `logmel`, output
+  /// `prob`, and `window_len` in its user metadata.
+  /// - Throws: `WakeScorerError.missingWindowLength` if the metadata lacks it.
+  public init(model: MLModel) throws {
+    let metadata = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String]
+    guard let value = metadata?["window_len"], let length = Int(value), length > 0 else {
+      throw WakeScorerError.missingWindowLength
+    }
     self.model = model
+    windowLength = length
   }
 
   /// Loads the compiled model bundled as a VACore resource (see `make
@@ -66,7 +76,7 @@ public struct WakeScorer {
     return (scores.map(\.probability).max() ?? 0, scores.count)
   }
 
-  /// Model probability for one 16 kHz window of `SlidingWindow.length` samples.
+  /// Model probability for one 16 kHz window of `windowLength` samples.
   /// - Parameter samples: the window's samples.
   /// - Returns: the probability that the window contains the wake word.
   public func probability(of samples: [Float]) async throws -> Float {

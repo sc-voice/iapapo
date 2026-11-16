@@ -91,6 +91,8 @@ def export(run_dir, window_len):
     )
     for key, value in run_identity(run_dir).items():
         mlmodel.user_defined_metadata[key] = value
+    # Swift reads the window length from here, so it is never hardwired.
+    mlmodel.user_defined_metadata["window_len"] = str(window_len)
     out_path = os.path.join(run_dir, "wakenet.mlpackage")
     mlmodel.save(out_path)
 
