@@ -1,21 +1,15 @@
 #!/bin/sh
-# Exports one wake-word run to Core ML: writes wakenet.mlpackage and export.json into the run folder.
-# Then archives the minimal record needed to rebuild the export under models/wakeword/<version>/<run id>/:
-#   - run.json: training provenance (seed, args, train.py hash, data hashes, environment)
-#   - scores.csv: per-window scores of every clip, as train.py wrote them
-#   - run.log: the training log, which train-summary reads for positive clip lengths
-#   - train.json: the complete input record the engine ran on
-#   - export.json: export settings and library versions
-#   - export_coreml_nfhash: nf hash of scripts/python/export_coreml.py, the code that made the export
-# wakenet.pt is not archived here. Archive it only for production candidates.
+# Archives one verified wake-word run under models/wakeword/<version>/<run id>/:
+#   - wakenet.mlpackage: the Core ML model that verification checked
+#   - run.json, scores.csv, run.log, train.json: training record
+#   - export.json: export settings, plus export_coreml_nfhash and git_commit
+#   - eval-*.json and match-*.json: the verification records in the run folder
+# wakenet.pt is not archived. Copy it by hand only for production candidates.
 #
-# Runs from any directory. Runs export_coreml.py with the project's venv, found relative to this script.
+# Refuses to overwrite an archive that records a commit. Run only after make wake-export passes.
 #
 # Usage:
-#   scripts/export.sh <run folder>
-#
-# Example:
-#   scripts/export.sh lab/wakeword/out/<version>/<run>
+#   scripts/archive-export.sh <run folder>
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 VENV="$HERE/../.venv"
@@ -35,17 +29,17 @@ import json, sys
 commit = json.load(open(sys.argv[1])).get("git_commit")
 sys.exit(0 if commit not in (None, "UNCOMMITTED") else 1)
 ' "$DEST/export.json"; then
-    echo "refusing: $DEST already holds an export made from a commit; delete that folder to re-export" >&2
+    echo "refusing: $DEST already holds an export made from a commit; delete that folder to re-archive" >&2
     exit 1
 fi
 
-"$VENV/bin/python" "$HERE/python/export_coreml.py" "$@" || exit $?
-
-mkdir -p "$DEST"
+mkdir -p "$DEST/wakenet.mlpackage"
+cp -R "$RUN/wakenet.mlpackage/." "$DEST/wakenet.mlpackage/" || exit $?
 cp "$RUN/run.json" "$DEST/run.json" || exit $?
 cp "$RUN/scores.csv" "$DEST/scores.csv" || exit $?
 cp "$RUN/run.log" "$DEST/run.log" || exit $?
 cp "$RUN/train.json" "$DEST/train.json" || exit $?
+cp "$RUN"/eval-*.json "$RUN"/match-*.json "$DEST/" 2>/dev/null || true
 NFHASH=$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/export_coreml.py") || exit $?
 # The commit the export code came from, or UNCOMMITTED if scripts/ has changes not in HEAD.
 GIT_COMMIT=$(cd "$ROOT" && git status --porcelain -- scripts | grep -q . && echo UNCOMMITTED || git rev-parse HEAD 2>/dev/null || echo UNCOMMITTED)

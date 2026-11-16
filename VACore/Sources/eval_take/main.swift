@@ -54,7 +54,7 @@ func repoRelative(_ url: URL) -> String {
   return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
 }
 
-/// A new 7-character evaluation id from `nf id`, as eval_take.py makes.
+/// A new 10-character evaluation id from `nf id`, as eval_take.py makes.
 func newEvalID() throws -> String {
   let process = Process()
   process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -68,7 +68,7 @@ func newEvalID() throws -> String {
   else { throw EvalError(description: "nf id failed") }
   let id = String(decoding: data, as: UTF8.self)
     .trimmingCharacters(in: .whitespacesAndNewlines)
-  return String(id.prefix(7))
+  return String(id.prefix(10))
 }
 
 /// Mono samples of a 48 kHz WAV, averaging channels as train.load_clip does.

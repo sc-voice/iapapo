@@ -51,7 +51,12 @@ Since training is reproduceable by specifying a training seed,
 we can train multiple models for evaluation.
 In practice seeds 1-20 have proven sufficient to generate workable models.
 
-- **Command:** `scripts/train.sh --seed N`. The default seed is 0, so always pass the seed explicitly.
+> Command: `scripts/train.sh --seed N`
+> Example:
+```
+    scripts/train.sh --seed 16
+```
+
 - **Default Settings:** 6000 steps, learning rate 0.001, batch 32, threshold 0.5, noise SNR 3 to 30 dB. The window is set by the longest trimmed positive.
 - **No holdout by default.** The run prints a warning, and its scores are on training data. Use the held-out takes after training.
 - **Output files:** each run folder holds `wakenet.pt` (the weights), `scores.csv`, `run.json`, `run.log` and `train.json`. `wakenet.pt` is required for export and held-out evaluation.
@@ -62,16 +67,11 @@ In practice seeds 1-20 have proven sufficient to generate workable models.
 - **Training Run** is identified by the first 6 characters of a ZUID (e.g., 0Q7YdK). The ZUID format is defined in [zuid.ts](https://github.com/sc-voice/nx-scv/blob/nx-nameforma/pkg/nameforma/src/zuid.ts): a UUIDv7 written as 22 base-63 characters.
 - **Status:** seeds 1 to 20 are trained on macOS 27. Seed 16 is the strongest on training positives. Seeds 5 and 15 were the earlier best. Seed 0 is unused.
 
-The trained output for each seed will be in a run folder at:
+The trained output for each seed will be in a run folder at: `lab/wakeword/out/<version>/no-take-<run id>/`
+Example:
 
 ```
-    lab/wakeword/out/<version>/no-take-<run id>/
-```
-
-The current seed 16 model 0Q7YdK was trained into:
-
-```
-lab/wakeword/out/N9qAHM3FB/no-take-0Q7YdK/.
+  lab/wakeword/out/N9qAHM3FB/no-take-0Q7YdK/
 ```
 
 Since runs are timestamped, their ids will be different and weights need to be compared. With the same seed, Python weights will be an exact match. However the CoreML weights will differ slightly due to the export process.
@@ -91,18 +91,20 @@ Each candidate run is scored on the three held-out takes with the Python pipelin
 
 Note: for convenience, the eval-table script also accepts the run id alone, and shows the newest record for each take and pipeline. For example:
 
-> ```
-> ./scripts/eval-table.py 0Q7YdK
-> ```
+> Example:
+```
+    ./scripts/eval-table.py 0Q7YdK
+```
 
 - **Command:** `scripts/eval-take.sh <run id> <full take path> --pipeline python`. The take path must be the full path, such as `lab/wakeword/takes/turtlePro/20261102-082403`. A bare take name is not found.
 - **Table:** `scripts/eval-table.py <run folder> <eval ids> --threshold <t>` shows the per-clip scores and triggers.
 - **Thresholds:** report at 0.5 and at 0.8, the current wakeword setting.
+- **Eval IDs:** eval records take the first 10 characters of `nf id`. The 7-character prefix collided on macOS: IDs that differ only in letter case name the same file, and a later record overwrote an earlier one. Training run IDs are still 6 characters.
 - **Takes:** described under "Held-out results for 0Q6-ou" and in Spoken Phrases.
 
 ### Seed 16 (run `0Q7YdK`)
 
-Eval records `0Q7aE_z`, `0Q7aF0J` and `0Q7aF0e`, written by `eval-take.sh` with the Python pipeline. Triggers are the same at 0.5 and 0.8 for every clip.
+Eval records `0Q7aE_z`, `0Q7aF0J` and `0Q7aF0e`, written by `eval-take.sh` with the Python pipeline. They used 7-character IDs and remain in the run folder. The 2026-11-16 re-verification (`make wake-export`) wrote newer records with 10-character IDs, and those are the ones `verify_export.py` checks. Triggers are the same at 0.5 and 0.8 for every clip.
 
 | Take | Clip | Score | Triggers at 0.5 and 0.8 |
 |---|---|---|---|
@@ -137,25 +139,47 @@ The criteria for choosing seed 16 were (descending order):
 
 Export turns a chosen run's `wakenet.pt` into a Core ML package. Do this only for a run that has passed the held-out check in "Evaluate Python Model".
 
-> Command:
->
+### Export and Validate
+
+> Command: `make wake-export RUN=<run id>`
+> Example:
 > ```
-> scripts/export.sh lab/wakeword/out/N9qAHM3FB/no-take-<run id>
+>   make wake-export RUN=0Q7YdK
 > ```
 
 - **Output in the run folder:** `wakenet.mlpackage` and `export.json`.
-- **Archive:** `scripts/export.sh` copies `run.json`, `scores.csv`, `run.log`, `train.json` and `export.json` to `models/wakeword/<version>/<run id>/`. It does not copy `wakenet.pt`. Copy the weights by hand only for a production candidate.
+- **Archive:** `make wake-export RUN=<run id> ARCHIVE=1` archives only after verification passes. Without `ARCHIVE=1` the run is verified and nothing is written to `models/`. It copies `wakenet.mlpackage`, `run.json`, `scores.csv`, `run.log`, `train.json`, `export.json` and the eval records to `models/wakeword/<version>/<run id>/`. It does not copy `wakenet.pt`. Copy the weights by hand only for a production candidate.
 - **Window length:** `export_coreml.py` reads `window_len` from the run's `run.json` and writes it into the Core ML user metadata. `WakeScorer` requires that metadata. A run without `window_len` in `run.json` predates the current `train.py` and must be retrained.
 - **Commit record:** the archive's `export.json` records `git_commit` as the current HEAD, or `UNCOMMITTED` if `scripts/` has changes not in HEAD.
 - **No overwrite:** export refuses to overwrite an archive that records a commit. Delete that folder first to re-export.
-- **Environment:** `scripts/export.sh` runs with the project's `.venv`.
+- **Environment:** `make wake-export` runs with the project's `.venv`.
+- **Verification:** `make wake-export RUN=<run id>` exports, then checks: `window_len` is in `run.json`; Core ML matches PyTorch on a held-out take within 1e-3; Swift `eval_take` matches the Python eval on each held-out take within 1e-3; trigger counts at 0.5 and 0.8 match the Python records. It fails on the first failed check. Export writes only into the run folder, not `models/`. Passed for `0Q7YdK` on 2026-11-16: Core ML matches PyTorch on all three held-out takes, and Swift and Python evals agree on every clip.
 
-Export writes into `models/`, which is stored data, so confirm with the user before running it.
+### Archive Model
 
+If model passes, it should be archived. 
+Archival writes into `models/`, which is stored data, so confirm with the user before running it. Only a model that passed verification is archived.
+
+> Command:
+>
+> ```
+> make wake-export RUN=<run id> ARCHIVE=1
+> ```
+>
+> Example:
+>
+> ```
+>     make wake-export RUN=0Q7YdK ARCHIVE=1
+> ```
 
 ## Evaluate Swift CoreML Model
 
 ## Archive and Deploy Swift Model
+
+- **Order:** export, verify, archive, deploy. Each step needs the previous one to pass.
+- **Deploy (planned):** `make build-model` compiles the archived `wakenet.mlpackage` into `VACore/Sources/VACore/Resources/wakenet.mlmodelc`. It should read from `models/`, not `lab/`. The bundled model is what the app and the Swift tests load.
+- **When:** run it only when the shipped model changes. It rewrites a tracked resource, so it is not part of a routine build. Confirm with the user first.
+- **Tests:** after archiving, dev tests read the archived model, not `lab/`. Training folders are not needed to run tests.
 
 ## Unorganized Information Follows
 

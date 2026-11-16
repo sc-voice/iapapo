@@ -49,7 +49,7 @@ help:
 	@echo "  make format       Apply .swiftformat to the app and core Swift sources"
 	@echo "  make help         Show this list"
 	@echo "  make install      Check Xcode/macOS versions, build the Python env, resolve Swift packages"
-	@echo "  make export       Core ML export of a wake-word run (RUN=<run folder>)"
+	@echo "  make wake-export  Export a wake-word run, then verify it (RUN=<run id> [ARCHIVE=1])"
 	@echo "  make match        Core ML vs PyTorch match on a wake-word run (RUN=<run folder> TAKE=<take folder>)"
 	@echo "  make report-loc   Print lines of tracked code by area and language"
 	@echo "  make test-all    Run VACore, VA app and wake-word matcher tests"
@@ -70,12 +70,6 @@ install:
 	swift package --package-path VACore resolve
 	@$(PY) -c "import sys, torch, coremltools; print('python     ', sys.version.split()[0]); print('torch      ', torch.__version__); print('coremltools', coremltools.__version__)" 2>/dev/null
 	@echo "install: ready"
-
-# Core ML export for one wake-word run: writes wakenet.mlpackage and export.json into the run folder.
-# RUN has no default: pass it, e.g. make export RUN=lab/wakeword/out/<version>/<run>.
-export:
-	@test -n "$(RUN)" || { echo "make export needs RUN=<run folder>"; exit 1; }
-	scripts/export.sh $(RUN)
 
 # Core ML match for one wake-word run on one take. The run folder must already hold wakenet.pt,
 # wakenet.mlpackage (scripts/python/export_coreml.py) and run.json. RUN and TAKE have no default: pass both.
@@ -105,6 +99,24 @@ test-wakeword:
 	$(PY) scripts/python/tests/test_train_cli.py
 	$(MAKE) match RUN="$(or $(RUN),$(WAKE_DEFAULT_RUN))" TAKE="$(or $(TAKE),$(WAKE_DEFAULT_TAKE))"
 	swift test -c release --package-path VACore --filter 'scoreFromWAVMatchesPythonEval|wakeScoresMatchPythonEval|logMelMatchesPython|frontEndFromWAVMatchesPython|arrayResamplerMatchesScipy'
+
+# Held-out takes for verifying an export (see the wake-word article, "Held-out results").
+HELDOUT_TAKES := lab/wakeword/takes/turtlePro/20261102-082403 lab/wakeword/takes/turtlePro/20261103-163155 lab/wakeword/takes/turtlePro/20261104-075505
+
+# Export one run to Core ML, then verify it against the held-out takes. Writes only into the run folder.
+# RUN is a run ID (e.g. RUN=0Q7YdK) or a run folder path. ARCHIVE=1 also copies the verified model
+# and records into models/ after verification passes.
+RUN_DIR = $(if $(findstring /,$(RUN)),$(RUN),$(firstword $(wildcard lab/wakeword/out/*/no-take-$(RUN))))
+wake-export:
+	@test -n "$(RUN)" || { echo "make wake-export needs RUN=<run id or run folder>"; exit 1; }
+	@test -n "$(RUN_DIR)" || { echo "wake-export: no run folder for RUN=$(RUN)"; exit 1; }
+	@$(PY) -c "import json,sys; sys.exit(0 if json.load(open('$(RUN_DIR)/run.json')).get('window_len') else 1)" || { echo "wake-export: $(RUN_DIR)/run.json has no window_len; retrain the run"; exit 1; }
+	$(PY) scripts/python/export_coreml.py $(RUN_DIR)
+	swift build -c release --package-path VACore --product eval_take
+	@for take in $(HELDOUT_TAKES); do $(PY) scripts/python/test_coreml_match.py $(RUN_DIR) $$take || exit 1; done
+	@for take in $(HELDOUT_TAKES); do scripts/eval-take.sh $(RUN_DIR) $$take --pipeline both || exit 1; done
+	$(PY) scripts/python/verify_export.py $(RUN_DIR) $(HELDOUT_TAKES)
+	@if [ "$(ARCHIVE)" = "1" ]; then scripts/archive-export.sh $(RUN_DIR); else echo "verified; not archived (add ARCHIVE=1 to archive)"; fi
 
 wake-base:
 	scripts/train.sh $(ARGS)
