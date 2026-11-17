@@ -15,10 +15,14 @@ build-app:
 build-core:
 	swift build --package-path VACore
 
-# Compiles the lab wake-word model into VACore's resources. The output is a build artifact, kept out of git.
+# Compiles an archived wake-word model (RUN=<run id>, from models/wakeword/<version>/<run id>/) into VACore's resources.
+# The output is a build artifact, kept out of git.
 build-model:
-	mkdir -p VACore/Sources/VACore/Resources
-	xcrun coremlcompiler compile lab/wakeword/out/JNaU8v4L6/no-take-0Q6-ou/wakenet.mlpackage VACore/Sources/VACore/Resources
+	@test -n "$(RUN)" || { echo "make build-model needs RUN=<run id>"; exit 1; }
+	@MODEL=$$(ls -d models/wakeword/*/$(RUN)/wakenet.mlpackage 2>/dev/null | head -1); \
+	test -n "$$MODEL" || { echo "build-model: no archived wakenet.mlpackage for RUN=$(RUN) under models/wakeword/"; exit 1; }; \
+	mkdir -p VACore/Sources/VACore/Resources && \
+	xcrun coremlcompiler compile "$$MODEL" VACore/Sources/VACore/Resources
 
 # Restore the checkout to "as if new": remove generated and per-user state.
 # Leaves local/ and .nameforma logs alone.
@@ -49,7 +53,7 @@ help:
 	@echo "  make format       Apply .swiftformat to the app and core Swift sources"
 	@echo "  make help         Show this list"
 	@echo "  make install      Check Xcode/macOS versions, build the Python env, resolve Swift packages"
-	@echo "  make wake-export  Export a wake-word run, then verify it (RUN=<run id> [ARCHIVE=1])"
+	@echo "  make wake-export  Export a wake-word run, then verify it (RUN=<run id> HOLDOUT=<take folder>... [ARCHIVE=1])"
 	@echo "  make match        Core ML vs PyTorch match on a wake-word run (RUN=<run folder> TAKE=<take folder>)"
 	@echo "  make report-loc   Print lines of tracked code by area and language"
 	@echo "  make test-all    Run VACore, VA app and wake-word matcher tests"
@@ -86,7 +90,7 @@ test-app:
 	xcodebuild -project VA/VA.xcodeproj -scheme VA -destination '$(SIMULATOR)' test
 
 test-core:
-	swift test -c release --package-path VACore --skip showSwiftScores --skip scoreFromWAVMatchesPythonEval --skip wakeScoresMatchPythonEval --skip logMelMatchesPython --skip frontEndFromWAVMatchesPython --skip arrayResamplerMatchesScipy
+	swift test -c release --package-path VACore --filter VACoreTests
 
 # Wake-word matcher end to end: its unit tests, Core ML vs PyTorch match on one run, and the
 # Swift front end vs Python features. RUN and TAKE are described at match. Without them, the match
@@ -98,24 +102,29 @@ test-wakeword:
 	$(PY) scripts/python/tests/test_nfhash.py
 	$(PY) scripts/python/tests/test_train_cli.py
 	$(MAKE) match RUN="$(or $(RUN),$(WAKE_DEFAULT_RUN))" TAKE="$(or $(TAKE),$(WAKE_DEFAULT_TAKE))"
-	swift test -c release --package-path VACore --filter 'scoreFromWAVMatchesPythonEval|wakeScoresMatchPythonEval|logMelMatchesPython|frontEndFromWAVMatchesPython|arrayResamplerMatchesScipy'
+	swift test -c release --package-path VACore --filter VAValidationTests
 
-# Held-out takes for verifying an export (see the wake-word article, "Held-out results").
-HELDOUT_TAKES := lab/wakeword/takes/turtlePro/20261102-082403 lab/wakeword/takes/turtlePro/20261103-163155 lab/wakeword/takes/turtlePro/20261104-075505
+# Export one run to Core ML, then verify it against the holdout folders in HOLDOUT. Writes only into the run folder.
+# RUN is a run ID (e.g. RUN=0Q7YdK) or a run folder path. HOLDOUT is one or more folders of wav clips
+# (space-separated). The default is the Ava hello clip, converted from media/ before the export; pass a take
+# folder for more data. ARCHIVE=1 also copies the verified model and records into models/ after verification passes.
+HOLDOUT ?= lab/wakeword/holdout/hello
+# The Ava hello clip, labeled positive by its file name. Float32 wav, the same decode the Swift tests read.
+HELLO_WAV := lab/wakeword/holdout/hello/positive-Ava_premium_hello.wav
+$(HELLO_WAV): media/iapapo/holdout/positive-Ava_premium_hello.m4a
+	mkdir -p $(dir $@)
+	afconvert -f WAVE -d LEF32 $< $@
 
-# Export one run to Core ML, then verify it against the held-out takes. Writes only into the run folder.
-# RUN is a run ID (e.g. RUN=0Q7YdK) or a run folder path. ARCHIVE=1 also copies the verified model
-# and records into models/ after verification passes.
 RUN_DIR = $(if $(findstring /,$(RUN)),$(RUN),$(firstword $(wildcard lab/wakeword/out/*/no-take-$(RUN))))
-wake-export:
+wake-export: $(HELLO_WAV)
 	@test -n "$(RUN)" || { echo "make wake-export needs RUN=<run id or run folder>"; exit 1; }
 	@test -n "$(RUN_DIR)" || { echo "wake-export: no run folder for RUN=$(RUN)"; exit 1; }
 	@$(PY) -c "import json,sys; sys.exit(0 if json.load(open('$(RUN_DIR)/run.json')).get('window_len') else 1)" || { echo "wake-export: $(RUN_DIR)/run.json has no window_len; retrain the run"; exit 1; }
 	$(PY) scripts/python/export_coreml.py $(RUN_DIR)
 	swift build -c release --package-path VACore --product eval_take
-	@for take in $(HELDOUT_TAKES); do $(PY) scripts/python/test_coreml_match.py $(RUN_DIR) $$take || exit 1; done
-	@for take in $(HELDOUT_TAKES); do scripts/eval-take.sh $(RUN_DIR) $$take --pipeline both || exit 1; done
-	$(PY) scripts/python/verify_export.py $(RUN_DIR) $(HELDOUT_TAKES)
+	@for take in $(HOLDOUT); do $(PY) scripts/python/test_coreml_match.py $(RUN_DIR) $$take || exit 1; done
+	@for take in $(HOLDOUT); do scripts/eval-take.sh $(RUN_DIR) $$take --pipeline both || exit 1; done
+	$(PY) scripts/python/verify_export.py $(RUN_DIR) $(HOLDOUT)
 	@if [ "$(ARCHIVE)" = "1" ]; then scripts/archive-export.sh $(RUN_DIR); else echo "verified; not archived (add ARCHIVE=1 to archive)"; fi
 
 wake-base:

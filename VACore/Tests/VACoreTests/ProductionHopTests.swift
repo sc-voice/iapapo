@@ -8,7 +8,7 @@ private func completeWindows(_ count: Int, step: Int) -> Int {
     ? 0 : (count - testWindowLength) / step + 1
 }
 
-/// Scores `Ava_premium_hello.m4a` through the full chain at one hop size. Each
+/// Scores `positive-Ava_premium_hello.m4a` through the full chain at one hop size. Each
 /// 48 kHz input chunk is 3 × `step` samples, so the resampler emits one hop's
 /// worth of 16 kHz samples per chunk: chunk size equals hop size.
 /// - Returns: the number of windows scored, and the highest probability.
@@ -20,7 +20,7 @@ private func scoreAtHop(_ step: Int) async throws
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/positive-Ava_premium_hello.m4a")
   let scorer = try WakeScorer.loadBundled()
   let streamer = try WAVStreamer(url: url)
 

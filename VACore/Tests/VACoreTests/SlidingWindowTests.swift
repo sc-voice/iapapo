@@ -48,7 +48,7 @@ private func checkWindows(
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/positive-Ava_premium_hello.m4a")
   let streamer = try WAVStreamer(url: url)
   let stream = ArrayResampler48To16().resample(streamer.samples)
   #expect(completeWindows(stream.count) == 8)
@@ -70,7 +70,7 @@ private func checkWindows(
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/positive-Ava_premium_hello.m4a")
   let streamer = try WAVStreamer(url: url)
 
   var resampler = Resampler48To16()

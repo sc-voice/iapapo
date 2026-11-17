@@ -8,14 +8,13 @@ window length, hop HOP_WINDOW_S), computes their log-mel features with train.log
     <out>/manifest.json shapes, clip names and the source run and take
 
 Usage:
-    .venv/bin/python scripts/export_frontend_reference.py <run folder> <take folder> <out folder>
+    .venv/bin/python scripts/python/export_frontend_reference.py <run folder> <audio file> <out folder>
 
-The take is resampled by train.load_clip, so this reference set does not test resampling; the Swift test
+The audio file is resampled by train.load_clip, so this reference set does not test resampling; the Swift test
 starts from these 16 kHz windows.
 """
 
 import argparse
-import glob
 import json
 import os
 import sys
@@ -32,26 +31,23 @@ from export_coreml import window_len_from_run  # noqa: E402
 def main():
     ap = argparse.ArgumentParser(description="Export reference log-mel features for the Swift front-end test.")
     ap.add_argument("run_dir", help="run folder whose window_len sets the window size")
-    ap.add_argument("take", help="take folder of wav clips")
+    ap.add_argument("source", help="holdout wav, e.g. lab/wakeword/holdout/hello/positive-Ava_premium_hello.wav")
     ap.add_argument("out", help="output folder")
     args = ap.parse_args()
     run_dir = os.path.abspath(args.run_dir)
-    take_dir = os.path.abspath(args.take)
+    source = os.path.abspath(args.source)
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
 
     window_len = window_len_from_run(run_dir)
     hop = int(train.HOP_WINDOW_S * train.SR)
+    name = os.path.splitext(os.path.basename(source))[0]
     names, windows = [], []
-    for path in sorted(glob.glob(os.path.join(take_dir, "*.wav"))):
-        name = os.path.splitext(os.path.basename(path))[0]
-        x = train.load_clip(path)
-        if name.startswith("positive"):
-            x = train.trim_speech(x)
-        for s in range(0, max(1, len(x) - window_len + 1), hop):
-            w = np.pad(x[s:s + window_len], (0, max(0, window_len - len(x[s:s + window_len]))))
-            names.append(name)
-            windows.append(w)
+    x = train.load_clip(source)
+    for s in range(0, max(1, len(x) - window_len + 1), hop):
+        w = np.pad(x[s:s + window_len], (0, max(0, window_len - len(x[s:s + window_len]))))
+        names.append(name)
+        windows.append(w)
     audio = np.stack(windows).astype("<f4")
     features = train.log_mel(torch.from_numpy(audio.astype(np.float32))).numpy()[:, 0].astype("<f4")
 
@@ -59,7 +55,7 @@ def main():
     features.tofile(os.path.join(out_dir, "features.f32"))
     manifest = {
         "run": train.repo_relative(run_dir),
-        "take": train.repo_relative(take_dir),
+        "source": train.repo_relative(source),
         "sample_rate": train.SR,
         "n_fft": train.N_FFT,
         "hop": train.HOP,

@@ -67,5 +67,10 @@ let package = Package(
             name: "VACoreTests",
             dependencies: ["VACore"]
         ),
+        // Checks the Swift front end and resampler against Python references in lab/. Run by make test-wakeword.
+        .testTarget(
+            name: "VAValidationTests",
+            dependencies: ["VACore"]
+        ),
     ]
 )

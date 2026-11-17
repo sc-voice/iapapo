@@ -1,0 +1,26 @@
+{
+  "source": "lab/wakeword/out/N9qAHM3FB/no-take-0Q7YdK/wakenet.pt",
+  "window_len": 14287,
+  "window_s": 0.8929375,
+  "sample_rate": 16000,
+  "hop_s": 0.01,
+  "frame_s": 0.025,
+  "n_mels": 40,
+  "input": {
+    "name": "logmel",
+    "shape": [
+      1,
+      1,
+      40,
+      90
+    ]
+  },
+  "output": {
+    "name": "prob"
+  },
+  "compute_precision": "float32",
+  "coremltools": "9.0",
+  "torch": "2.7.0",
+  "export_coreml_nfhash": "EiblvErHK5VwC18mVWeGzszUqe_7WQUHCDuygp1Cd-W",
+  "git_commit": "UNCOMMITTED"
+}

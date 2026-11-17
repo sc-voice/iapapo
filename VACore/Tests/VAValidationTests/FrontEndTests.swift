@@ -27,7 +27,7 @@ private func readFloats(_ url: URL) throws -> [Float] {
     .deletingLastPathComponent().deletingLastPathComponent()
   let url = repo
     .appendingPathComponent(
-      "lab/wakeword/takes/20261104-075505/negative-001.wav",
+      "lab/wakeword/holdout/hello/positive-Ava_premium_hello.wav",
     )
   let dir = repo.appendingPathComponent("lab/wakeword/reference/frontend")
 
@@ -38,8 +38,7 @@ private func readFloats(_ url: URL) throws -> [Float] {
   let frames = try #require(manifest?["frames"] as? Int)
   let nMels = try #require(manifest?["n_mels"] as? Int)
   let windowLen = try #require(manifest?["window_len"] as? Int)
-  #expect(windowLen == testWindowLength)
-  let clipWindows = clips.prefix { $0 == "negative-001" }.count
+  let clipWindows = clips.prefix { $0 == "positive-Ava_premium_hello" }.count
 
   let audio = try readFloats(dir.appendingPathComponent("windows.f32"))
   let reference = try readFloats(dir.appendingPathComponent("features.f32"))
@@ -47,7 +46,7 @@ private func readFloats(_ url: URL) throws -> [Float] {
   let streamer = try WAVStreamer(url: url)
   var resampler = Resampler48To16()
   var cutter = HopCutter()
-  var window = SlidingWindow(length: testWindowLength)
+  var window = SlidingWindow(length: windowLen)
   var windows: [[Float]] = []
   for chunk in streamer.chunks(size: 4096) {
     for hop in cutter.process(resampler.process(chunk)) {

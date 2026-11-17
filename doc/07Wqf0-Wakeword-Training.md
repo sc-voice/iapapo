@@ -153,7 +153,7 @@ Export turns a chosen run's `wakenet.pt` into a Core ML package. Do this only fo
 - **Commit record:** the archive's `export.json` records `git_commit` as the current HEAD, or `UNCOMMITTED` if `scripts/` has changes not in HEAD.
 - **No overwrite:** export refuses to overwrite an archive that records a commit. Delete that folder first to re-export.
 - **Environment:** `make wake-export` runs with the project's `.venv`.
-- **Verification:** `make wake-export RUN=<run id>` exports, then checks: `window_len` is in `run.json`; Core ML matches PyTorch on a held-out take within 1e-3; Swift `eval_take` matches the Python eval on each held-out take within 1e-3; trigger counts at 0.5 and 0.8 match the Python records. It fails on the first failed check. Export writes only into the run folder, not `models/`. Passed for `0Q7YdK` on 2026-11-16: Core ML matches PyTorch on all three held-out takes, and Swift and Python evals agree on every clip.
+- **Verification:** `make wake-export RUN=<run id>` exports, then checks: `window_len` is in `run.json`; Core ML matches PyTorch on the holdout within 1e-3; Swift `eval_take` matches the Python eval on the holdout within 1e-3; trigger counts at 0.5 and 0.8 are reported. The default holdout is the Ava hello clip, converted from `media/iapapo/holdout/` to `lab/wakeword/holdout/hello/positive-Ava_premium_hello.wav`. Every holdout clip is labeled by its file name: `positive-` or `negative-`. The eval counts a clip as positive or negative from that prefix, so a clip with no prefix is counted as negative. For more data, set `HOLDOUT` to one or more take folders of wav clips, such as `HOLDOUT=lab/wakeword/takes/turtlePro/20261104-075505`. It fails on the first failed check. Export writes only into the run folder, not `models/`. Passed for `0Q7YdK` on 2026-11-16 with the three held-out takes.
 
 ### Archive Model
 
@@ -198,20 +198,20 @@ Archival writes into `models/`, which is stored data, so confirm with the user b
 ## Verification
 
 - **Core ML against PyTorch.** `scripts/python/test_coreml_match.py <run folder> <take folder>` scores every window through both models. On `0Q6-ou` and take `20261104-075505`, all 69 windows match, with max difference 2.3e-06 against tolerance 1e-3. Record: `match-<id>.json` in the run folder.
-- **Swift front end against Python.** `VACore` test `logMelMatchesPython` compares `LogMelFrontEnd` with reference features from `scripts/python/export_frontend_reference.py`. It passes on the 69 windows of `20261104-075505`. The test covers features only, not resampling and not scores. Reference data lives in `lab/wakeword/reference/frontend/`.
-- **Swift scores against Python eval.** `VACore` test `wakeScoresMatchPythonEval` runs the Swift front end and the Core ML model on the same windows and compares per-clip maximum probabilities with `eval-0Q70Tk.json`, within 1e-3. It passes for `0Q6-ou` on `20261104-075505`. It covers that one take only.
-- **Swift resampler against scipy.** `VACore` test `arrayResamplerMatchesScipy` runs `ArrayResampler48To16`, the whole-clip version, on a 48 kHz take and compares the taps and output with `resample_poly`, within 1e-12 for taps and 1e-6 for samples. It covers a whole clip and a clip whose length is not a multiple of 3. Reference data comes from `scripts/python/export_resample_reference.py`, into `lab/wakeword/reference/resample/`.
+- **Swift front end against Python.** `VAValidationTests` test `logMelMatchesPython` compares `LogMelFrontEnd` with reference features from `scripts/python/export_frontend_reference.py`. The test covers features only, not resampling and not scores. Reference data lives in `lab/wakeword/reference/frontend/`.
+- **Swift front end from a WAV.** `VAValidationTests` test `frontEndFromWAVMatchesPython` runs `lab/wakeword/holdout/hello/positive-Ava_premium_hello.wav` through the Swift chain and compares its windows and features with the same reference. The reference is decoded as float32, because the test reads the m4a as float, and 16-bit decoding exceeds the tolerance.
+- **Swift resampler against scipy.** `VAValidationTests` test `arrayResamplerMatchesScipy` runs `ArrayResampler48To16`, the whole-clip version, and compares the taps and output with `resample_poly`, within 1e-12 for taps and 1e-6 for samples. It covers a whole clip and a clip whose length is not a multiple of 3. The taps are stored in `scripts/validation/resample/taps.f64`. The input clips come from the hello clip, and `scripts/python/export_resample_reference.py` regenerates them into `lab/wakeword/reference/resample/`.
+- **Score-level comparison.** Swift and Python scores are compared per clip by `eval_take` and `scripts/python/verify_export.py` during `make wake-export`, on the held-out takes. The per-clip check that used to be a VACore test has been removed as a duplicate.
 - **Streaming resampler against the whole-clip version.** `VACore` test `streamingResamplerMatchesWholeClip` feeds the take, chunked by `WAVStreamer`, through `Resampler48To16` in chunk sizes 4000, 4096, 977 and 1. Output equals `ArrayResampler48To16` exactly at every size. `streamingResamplerFlushesPartialTail` does the same for a 100001-sample prefix, whose length is not a multiple of 3.
 - **Stride cutter (`HopCutter`).** `VACore` test `hopCutterHopsGlueToWholeClipResampler` runs the take through `WAVStreamer`, `Resampler48To16` and `HopCutter`. Every stride is 4000 samples, and the strides glued together are the whole-clip resampler output followed by zeros. `hopCutterPadsTheFinalHopWithZeros` checks the padding on a synthetic ramp.
 
 ### Running the checks
 
-- `make test-core` runs every VACore test except `showSwiftScores`, in release mode: `swift test -c release --package-path VACore --skip showSwiftScores`. It takes under a second of test time. In debug the same tests took about 46 s, because the naive DFT in `LogMelFrontEnd` is slow without optimization.
-- `make test-wakeword RUN=<run folder> TAKE=<take folder>` runs the Python unit tests (matcher, nfhash, train CLI), the Core ML match for that run and take, and the `logMel` test in release mode. It does not run `wakeScoresMatchPythonEval`.
+- `make test-core` runs the `VACoreTests` target, which uses only bundled resources: `swift test -c release --package-path VACore --filter VACoreTests`.
+- `make test-wakeword RUN=<run folder> TAKE=<take folder>` runs the Python unit tests (matcher, nfhash, train CLI), the Core ML match for that run and take, and the `VAValidationTests` target.
 - `make test-app` runs the VA app tests on the simulator.
-- `swift test -c release --package-path VACore --filter showSwiftScores` prints the Swift chain's per-clip maxima beside the Python eval for the three held-out takes. It is a report, not a check, and takes about 1 s in release.
 
-Run `test-core` on every build. Run `test-wakeword` as a smoke test before a build that changes the model, the export or the front end. The two reference tests need their reference data first: `lab/wakeword/reference/frontend/` for `logMel`, and `lab/wakeword/reference/resample/` for the resampler test.
+Run `test-core` on every build. Run `test-wakeword` as a smoke test before a build that changes the model, the export or the front end. The validation tests need their reference data first: `lab/wakeword/reference/frontend/` for `logMel` and the front-end WAV test, and `lab/wakeword/reference/resample/` for the resampler test. Both are regenerated from the hello clip by their `scripts/python/export_*_reference.py` scripts.
 
 ## Held-out results for 0Q6-ou
 
@@ -304,7 +304,7 @@ The stride is the distance between window starts. Its period is the time from on
 - **Bins.** Five equal-width bins of probability. Column titles give the top of each bin, so `1.0…` is 0.8 to 1.0.
 - **Cells.** `windows@runs`. A run is a block of consecutive window indices in the same bin.
 
-<!-- Purpose: show how the stride period affects the number of matches and runs. The evaluation clip may have been the holdout hello clip (media/iapapo/holdout/Ava_premium_hello.m4a); not verified. -->
+<!-- Purpose: show how the stride period affects the number of matches and runs. The evaluation clip may have been the holdout hello clip (media/iapapo/holdout/positive-Ava_premium_hello.m4a); not verified. -->
 
 | Stride period | Windows | Total time | 1.0… | 0.8… | 0.6… | 0.4… | 0.2… |
 |---|---|---|---|---|---|---|---|
@@ -327,6 +327,8 @@ Findings:
 
 - Whether embedded mentions ("The quick IaPapo jumped…") count as positives or negatives.
 - Privacy of training audio and the model. The takes are the user's voice. Open questions: iCloud Drive and device backup, Advanced Data Protection, and synced Mac folders. Parked.
+- Validation test audio. Resolved: the validation tests use the synthetic hello clip, `media/iapapo/holdout/positive-Ava_premium_hello.m4a`, not the user's takes. Their references are regenerated from it.
+- VACore test audio. Unresolved. The VACore tests should use only bundled resources. Validation (`make wake-export`) takes its holdout as the `HOLDOUT` argument, so it no longer depends on the held-out takes being in the command.
 - On-device update of the final layer. Core ML ML Program; a hybrid pipeline with an updatable head is unconfirmed (`MLUpdateTask`). Parked.
 - A held-out take for each new export, and speakers beyond one. The base-model holdout is a proposal, not a decision: train on many speakers, then test on the user's own takes, which must stay separate from any personal fine-tuning data.
 
@@ -363,7 +365,7 @@ Facts for picking this work back up. Each item points to a file or a run; check 
 
 **Data**
 
-- Hello sentence: `media/iapapo/holdout/Ava_premium_hello.m4a`, 2.67 s. It holds a long sentence containing the wake word, so it is a holdout clip and never a training positive. Moving it out of `media/iapapo/` keeps it out of training. A WAV copy from my session is in `lab/wakeword/takes/hello/`, unused.
+- Hello sentence: `media/iapapo/holdout/positive-Ava_premium_hello.m4a`, 2.67 s. It holds a long sentence containing the wake word, so it is a holdout clip and never a training positive. Moving it out of `media/iapapo/` keeps it out of training. A WAV copy from my session is in `lab/wakeword/takes/hello/`, unused.
 
 **Tests**
 

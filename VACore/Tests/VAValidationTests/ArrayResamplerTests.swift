@@ -36,7 +36,9 @@ private func readDoubles(_ url: URL) throws -> [Double] {
   let dir = repo.appendingPathComponent("lab/wakeword/reference/resample")
 
   let resampler = ArrayResampler48To16()
-  let scipyTaps = try readDoubles(dir.appendingPathComponent("taps.f64"))
+  let scipyTaps = try readDoubles(
+    repo.appendingPathComponent("scripts/validation/resample/taps.f64"),
+  )
   #expect(resampler.taps.count == scipyTaps.count)
   var tapDiff = 0.0
   for (a, b) in zip(resampler.taps, scipyTaps) {

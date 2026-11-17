@@ -36,14 +36,17 @@ public struct WakeScorer {
     windowLength = length
   }
 
+  /// The compiled model bundled as a VACore resource (see `make build-model`).
+  /// - Returns: the bundled model's URL, or nil if it is not in the bundle.
+  public static func bundledModelURL() -> URL? {
+    Bundle.module.url(forResource: "wakenet", withExtension: "mlmodelc")
+  }
+
   /// Loads the compiled model bundled as a VACore resource (see `make
   /// build-model`).
   /// - Returns: a scorer for the bundled model.
   public static func loadBundled() throws -> WakeScorer {
-    guard let url = Bundle.module.url(
-      forResource: "wakenet",
-      withExtension: "mlmodelc",
-    ) else {
+    guard let url = bundledModelURL() else {
       throw WakeScorerError.missingBundledModel
     }
     return try WakeScorer(model: MLModel(contentsOf: url))

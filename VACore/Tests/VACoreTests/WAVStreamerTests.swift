@@ -9,7 +9,7 @@ import Testing
   let repo = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
-  let url = repo.appendingPathComponent("media/iapapo/holdout/Ava_premium_hello.m4a")
+  let url = repo.appendingPathComponent("media/iapapo/holdout/positive-Ava_premium_hello.m4a")
 
   let streamer = try WAVStreamer(url: url)
   #expect(streamer.sampleRate == 48000)

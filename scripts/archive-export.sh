@@ -3,7 +3,6 @@
 #   - wakenet.mlpackage: the Core ML model that verification checked
 #   - run.json, scores.csv, run.log, train.json: training record
 #   - export.json: export settings, plus export_coreml_nfhash and git_commit
-#   - eval-*.json and match-*.json: the verification records in the run folder
 # wakenet.pt is not archived. Copy it by hand only for production candidates.
 #
 # Refuses to overwrite an archive that records a commit. Run only after make wake-export passes.
@@ -39,7 +38,6 @@ cp "$RUN/run.json" "$DEST/run.json" || exit $?
 cp "$RUN/scores.csv" "$DEST/scores.csv" || exit $?
 cp "$RUN/run.log" "$DEST/run.log" || exit $?
 cp "$RUN/train.json" "$DEST/train.json" || exit $?
-cp "$RUN"/eval-*.json "$RUN"/match-*.json "$DEST/" 2>/dev/null || true
 NFHASH=$("$VENV/bin/python" "$HERE/nfhash.py" "$HERE/python/export_coreml.py") || exit $?
 # The commit the export code came from, or UNCOMMITTED if scripts/ has changes not in HEAD.
 GIT_COMMIT=$(cd "$ROOT" && git status --porcelain -- scripts | grep -q . && echo UNCOMMITTED || git rev-parse HEAD 2>/dev/null || echo UNCOMMITTED)
