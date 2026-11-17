@@ -13,11 +13,15 @@ public struct WakeScore: Sendable, Equatable {
   public let endSeconds: Double
   /// RMS level in dBFS of the most recent chunk, floored at -160.
   public let micDb: Float
-  /// Ambient floor in dBFS, or nil before the first 0.25 s hop.
+  /// Ambient floor in dBFS, starting at -60 and smoothed per 0.25 s hop.
   public let ambientDb: Float?
+  /// Smoothed RMS level in dBFS of recent windows, starting at -60. Its
+  /// half-life equals the window duration.
+  public let windowDb: Float?
   /// Whether the gate is open.
   public let gateOpen: Bool
-  /// Whether `probability` is at or above the monitor's wake level.
+  /// Whether `probability` is at or above the monitor's wake level and the gate
+  /// is open.
   public let wakeWord: Bool
 }
 
@@ -34,14 +38,18 @@ public struct WakeScore: Sendable, Equatable {
 public struct WakeMonitor {
   /// Samples per ambient hop at 48 kHz: 0.25 s.
   private static let hopSamples = 12_000
+  /// Starting ambient floor in dBFS, a typical quiet room, before any hop.
+  static let ambientSilenceDb: Float = -60
   /// Share of the gap to each new hop level. 1 - 0.5^(0.25 / 1.5), about 0.109.
   static let ambientAlpha: Float = 1 - pow(0.5, 0.25 / 1.5)
 
   private let scorer: WakeScorer
   /// Samples between window starts at 16 kHz.
   private let stride: Int
-  /// Probability at or above which an event's `wakeWord` is true.
+  /// Probability at or above which, with the gate open, an event's `wakeWord` is true.
   private let wakeLevel: Float
+  /// dB the window level must rise above the ambient floor to open the gate.
+  private let ambientWakeDb: Float
   private var resampler = Resampler48To16()
   private var cutter: HopCutter
   private var window: SlidingWindow
@@ -53,29 +61,41 @@ public struct WakeMonitor {
   private var currentProbability: Float = 0
   /// RMS level in dBFS of the most recent chunk, -160 when silent.
   private var micDb: Float = -160
-  /// Ambient floor in dBFS, nil until the first hop.
-  private var ambientDb: Float?
+  /// Ambient floor in dBFS, starting at `ambientSilenceDb` and smoothed per hop.
+  private var ambientDb: Float? = WakeMonitor.ambientSilenceDb
+  /// Share of the gap to each new hop level, with a half-life equal to the
+  /// window duration.
+  private let windowAlpha: Float
+  /// Smoothed window level in dBFS, starting at `ambientSilenceDb` and updated
+  /// per completed window.
+  private var windowDb: Float? = WakeMonitor.ambientSilenceDb
   /// Sum of squared 48 kHz samples and sample count for the hop in progress.
   private var hopSquares: Double = 0
   private var hopCount = 0
-  /// Placeholder: the gate starts open until its closing logic lands. The
-  /// intended default is closed. The ambient floor does not yet freeze while
-  /// the gate is open; that arrives with the gate logic.
+  /// Gate state. Open when `windowDb` exceeds `ambientDb` by at least
+  /// `ambientWakeDb`. Starts open until the first window is scored. The ambient
+  /// floor does not yet freeze while the gate is open.
   private var gateOpen = true
 
   /// Wake level used when the caller does not set one.
   public static let defaultWakeLevel: Float = 0.9
+  /// Ambient wake margin used when the caller does not set one, in dB.
+  public static let defaultAmbientWakeDb: Float = 6
 
   /// - Parameters:
   ///   - scorer: the scorer whose model and window probability the monitor uses.
   ///   - strideMs: milliseconds between window starts, and between events. Must
   ///   be a positive multiple of 10 ms, the frame period, so frames align across
   ///   strides. Defaults to the training grid's 250 ms (4000 samples).
-  ///   - wakeLevel: probability at or above which an event's `wakeWord` is true.
+  ///   - wakeLevel: probability at or above which, with the gate open, an event's
+  ///   `wakeWord` is true.
+  ///   - ambientWakeDb: dB the window level must rise above the ambient floor
+  ///   to open the gate.
   public init(
     scorer: WakeScorer,
     strideMs: Int = 250,
     wakeLevel: Float = WakeMonitor.defaultWakeLevel,
+    ambientWakeDb: Float = WakeMonitor.defaultAmbientWakeDb,
   ) {
     precondition(
       strideMs > 0 && strideMs % 10 == 0,
@@ -84,9 +104,13 @@ public struct WakeMonitor {
     let stride = strideMs * LogMelFrontEnd.sampleRate / 1000
     self.scorer = scorer
     self.wakeLevel = wakeLevel
+    self.ambientWakeDb = ambientWakeDb
     self.stride = stride
     cutter = HopCutter(hopLength: stride)
     window = SlidingWindow(length: scorer.windowLength, step: stride)
+    let windowSeconds = Double(scorer.windowLength) / Double(LogMelFrontEnd.sampleRate)
+    let hopSeconds = Double(Self.hopSamples) / 48_000
+    windowAlpha = Float(1 - pow(0.5, hopSeconds / (windowSeconds / 2)))
   }
 
   /// Adds 48 kHz mono samples to the stream.
@@ -127,8 +151,9 @@ public struct WakeMonitor {
       endSeconds: Double(stride * strides) / Double(LogMelFrontEnd.sampleRate),
       micDb: micDb,
       ambientDb: ambientDb,
+      windowDb: windowDb,
       gateOpen: gateOpen,
-      wakeWord: currentProbability >= wakeLevel,
+      wakeWord: currentProbability >= wakeLevel && gateOpen,
     )
   }
 
@@ -137,6 +162,9 @@ public struct WakeMonitor {
     for samples in windows {
       currentProbability = try await scorer.probability(of: samples)
       scored += 1
+      if let level = windowDb, let floor = ambientDb {
+        gateOpen = level - floor >= ambientWakeDb
+      }
     }
   }
 
@@ -153,6 +181,11 @@ public struct WakeMonitor {
       ambientDb = floor + (dB - floor) * Self.ambientAlpha
     } else {
       ambientDb = dB
+    }
+    if let level = windowDb {
+      windowDb = level + (dB - level) * windowAlpha
+    } else {
+      windowDb = dB
     }
     hopSquares = 0
     hopCount = 0

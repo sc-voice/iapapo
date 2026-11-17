@@ -159,3 +159,94 @@ private func latestWindow(atStride i: Int) -> Int {
     #expect(hot == Array(first...last), "windows above 0.8 are not one run: \(hot)")
   }
 }
+
+/// Debug output only: prints ambientDb and windowDb for every event over the
+/// Ava clip, padded with silence to the next stride after one full window.
+@Test func monitorPrintsAmbientAndWindowDb() async throws {
+  let repo = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent()
+  let url = repo.appendingPathComponent("media/iapapo/Ava_premium__.m4a")
+  let scorer = try WakeScorer.loadBundled()
+  let windowLength48 = scorer.windowLength * 3
+  let strideLength48 = 12_000
+  let target = ((windowLength48 + strideLength48 - 1) / strideLength48) * strideLength48
+  var monitor = WakeMonitor(scorer: scorer)
+  var scores: [WakeScore] = []
+  var total = 0
+  for chunk in try WAVStreamer(url: url).chunks(size: 4096) {
+    total += chunk.count
+    scores += try await monitor.process(chunk)
+  }
+  // Seeded uniform noise with RMS 0.001 (-60 dBFS), so runs repeat exactly.
+  var seed: UInt64 = 1
+  func nextNoise() -> Float {
+    seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+    let u = Float(seed >> 11) / Float(1 << 53)
+    return (u * 2 - 1) * 0.001 * Float(3).squareRoot()
+  }
+  while total < target {
+    let n = min(4096, target - total)
+    let noise = (0..<n).map { _ in nextNoise() }
+    total += n
+    scores += try await monitor.process(noise)
+  }
+  scores += try await monitor.flush()
+  var table = "DBG windowLen16k=\(scorer.windowLength) padTo48k=\(target) hops=\(scores.count)"
+  table += "\nDBG   hop    t(s)   ambientDb  windowDb     delta"
+  for (k, s) in scores.enumerated() {
+    let amb = s.ambientDb.map { String(format: "%8.1f", $0) } ?? "       -"
+    let win = s.windowDb.map { String(format: "%8.1f", $0) } ?? "       -"
+    let delta = (s.windowDb != nil && s.ambientDb != nil)
+      ? String(format: "%8.1f", s.windowDb! - s.ambientDb!)
+      : "       -"
+    table += "\nDBG \(String(format: "%5d", k + 1)) \(String(format: "%7.2f", s.endSeconds)) \(amb) \(win) \(delta)"
+  }
+  print(table)
+}
+
+/// The Ava hello holdout clip stays positive: the gate is open on every hop
+/// and the probability crosses the wake level at hops 7 and 8. Reference trace
+/// (ambientDb, windowDb, delta, gate, p) at 250 ms hops:
+///   1: -55.1  -45.6   9.5  open  0.000
+///   2: -50.9  -36.1  14.8  open  0.000
+///   3: -47.3  -30.3  17.0  open  0.000
+///   4: -44.1  -26.4  17.7  open  0.000
+///   5: -41.2  -23.6  17.6  open  0.000
+///   6: -38.5  -21.1  17.3  open  0.008
+///   7: -36.2  -20.0  16.2  open  1.000
+///   8: -34.1  -19.0  15.1  open  0.999
+///   9: -32.4  -18.9  13.5  open  0.000
+///  10: -31.2  -19.6  11.6  open  0.000
+@Test func monitorHelloClipStaysPositive() async throws {
+  let repo = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent()
+  let url = repo.appendingPathComponent("media/iapapo/holdout/positive-Ava_premium_hello.m4a")
+  let scorer = try WakeScorer.loadBundled()
+  var monitor = WakeMonitor(scorer: scorer)
+  var scores: [WakeScore] = []
+  for chunk in try WAVStreamer(url: url).chunks(size: 4096) {
+    scores += try await monitor.process(chunk)
+  }
+  scores += try await monitor.flush()
+  var table = "DBG hops=\(scores.count)"
+  table += "\nDBG   hop    t(s)   ambientDb  windowDb     delta   gate      p"
+  for (k, s) in scores.enumerated() {
+    let amb = s.ambientDb.map { String(format: "%8.1f", $0) } ?? "       -"
+    let win = s.windowDb.map { String(format: "%8.1f", $0) } ?? "       -"
+    let delta = (s.windowDb != nil && s.ambientDb != nil)
+      ? String(format: "%8.1f", s.windowDb! - s.ambientDb!)
+      : "       -"
+    table += "\nDBG \(String(format: "%5d", k + 1)) \(String(format: "%7.2f", s.endSeconds)) \(amb) \(win) \(delta) \(s.gateOpen ? "  open" : "closed") \(String(format: "%6.3f", s.probability))"
+  }
+  print(table)
+  let hops = scores.count
+  let allOpen = scores.allSatisfy { $0.gateOpen }
+  let anyWake = scores.contains { $0.wakeWord }
+  let hop7and8 = hops >= 8 && scores[6].wakeWord && scores[7].wakeWord
+  #expect(hops == 10, "hello clip: \(hops) hops, expected 10")
+  #expect(allOpen, "gate closed on some hop")
+  #expect(anyWake, "no wake word on the hello clip")
+  #expect(hop7and8, "hops 7 and 8 not wake words")
+}
