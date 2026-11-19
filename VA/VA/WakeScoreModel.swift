@@ -24,8 +24,15 @@ final class WakeScoreModel {
   /// Ambient floor in dBFS from the latest score, nil until the first hop.
   private(set) var ambientDb: Float?
 
+  /// Smoothed window level in dBFS from the latest score, nil until the first hop.
+  private(set) var windowDb: Float?
+
+  /// Whether the window level is at least the gate margin above the ambient
+  /// floor, from the latest score. False until the first hop.
+  private(set) var gateOpen = false
+
   /// The wake monitor's scoring period, in milliseconds. One event per stride.
-  static let strideMs = 50
+  static let strideMs = WakeMonitor.productionStrideMs
   /// Probability at or above which a stride counts as a wake word.
   static let wakeLevel = WakeMonitor.defaultWakeLevel
   /// Span of the history charts, in milliseconds.
@@ -48,16 +55,17 @@ final class WakeScoreModel {
   private(set) var wakeHistory: [Bool] = []
   /// Whether the latest event was a wake word.
   private(set) var wakeWord = false
-  /// Consecutive strides that were wake words.
-  @ObservationIgnored private var wakeRun = 0
-  /// Called once each time a run of `wakeRunLength` wake-word strides starts.
-  @ObservationIgnored var onWakeRun: (() -> Void)?
-  /// Strides in a row that count as a recognized wake word.
-  static let wakeRunLength = 4
-  /// When `onWakeRun` last fired, so it fires at most once per cooldown.
-  @ObservationIgnored private var lastWakeRunAt: Date?
-  /// Minimum seconds between calls to `onWakeRun`.
-  static let wakeRunCooldown: TimeInterval = 2
+
+  /// Shows each score from `scores` until the stream finishes. Wake events are
+  /// not decided here; `WakeMonitor` emits them and `VAAgent` reacts.
+  /// - Parameter scores: one score per stride, from `WakeMonitor.scores`.
+  func consume(_ scores: AsyncStream<WakeScore>) {
+    Task {
+      for await score in scores {
+        receive(score)
+      }
+    }
+  }
 
   /// Applies one score from `WakeMonitor`.
   /// - Parameter score: the window's probability, levels and gate state.
@@ -65,21 +73,12 @@ final class WakeScoreModel {
     let raw = score.probability
     shown = raw >= shown ? raw : raw + (shown - raw) * Self.decayPerHop
     ambientDb = score.ambientDb
+    windowDb = score.windowDb
+    gateOpen = score.gateOpen
     micHistory = Array(([score.micDb] + micHistory).prefix(Self.historyCount))
     scoreHistory = Array(([raw] + scoreHistory).prefix(Self.historyCount))
     wakeHistory = Array(([score.wakeWord] + wakeHistory).prefix(Self.historyCount))
     wakeWord = score.wakeWord
-    if score.wakeWord {
-      wakeRun += 1
-      let now = Date()
-      if wakeRun == Self.wakeRunLength,
-         lastWakeRunAt.map({ now.timeIntervalSince($0) >= Self.wakeRunCooldown }) ?? true {
-        lastWakeRunAt = now
-        onWakeRun?()
-      }
-    } else {
-      wakeRun = 0
-    }
     if Self.verbose {
       let ms = Int(Date().timeIntervalSince(clockStart) * 1000)
       print("[VA wake] t \(ms) ring \(String(format: "%.1f", ringDb)) bar \(String(format: "%.1f", score.micDb)) raw \(raw) inferred \(shown)")
@@ -91,12 +90,12 @@ final class WakeScoreModel {
   func reset() {
     shown = 0
     ambientDb = nil
+    windowDb = nil
+    gateOpen = false
     micHistory = []
     scoreHistory = []
     wakeHistory = []
     wakeWord = false
-    wakeRun = 0
-    lastWakeRunAt = nil
   }
 }
 
@@ -115,6 +114,8 @@ final class WakeFeed {
 
   private let model: WakeScoreModel
   private let log: EventLog
+  private let agent: VAAgent
+  private let settings: any AppSettings
   private let scorer: WakeScorer?
   private var continuation: AsyncStream<[Float]>.Continuation?
   private var task: Task<Void, Never>?
@@ -127,9 +128,13 @@ final class WakeFeed {
   /// - Parameters:
   ///   - model: receives each raw score.
   ///   - log: records when the bundled model is missing.
-  init(model: WakeScoreModel, log: EventLog) {
+  ///   - agent: receives each wake event from the monitor.
+  ///   - settings: supplies the wake monitor's ambient wake margin.
+  init(model: WakeScoreModel, log: EventLog, agent: VAAgent, settings: any AppSettings) {
     self.model = model
     self.log = log
+    self.agent = agent
+    self.settings = settings
     do {
       scorer = try WakeScorer.loadBundled()
     } catch {
@@ -145,27 +150,32 @@ final class WakeFeed {
     let (stream, continuation) = AsyncStream<[Float]>.makeStream()
     self.continuation = continuation
     model.clockStart = Date()
+    let monitor = WakeMonitor(
+      scorer: scorer,
+      strideMs: WakeMonitor.productionStrideMs,
+      wakeLevel: WakeScoreModel.wakeLevel,
+      settings: settings,
+    )
+    model.consume(monitor.scores)
+    let agent = agent
+    let events = monitor.events
+    Task { await agent.run(events) }
     let model = model
     let log = log
-    task = Task {
-      var monitor = WakeMonitor(
-        scorer: scorer,
-        strideMs: WakeScoreModel.strideMs,
-        wakeLevel: WakeScoreModel.wakeLevel,
-      )
+    task = Task { [monitor] in
+      var monitor = monitor
       var warnedOverrun = false
       for await chunk in stream {
         do {
           let started = ContinuousClock.now
-          let scores = try await monitor.process(chunk)
+          // Scores reach the model and events reach the agent through the
+          // monitor's streams, so the returned array is not needed here.
+          _ = try await monitor.process(chunk)
           // One stride must score within one stride period, or the events lag
           // the audio. Warn once per session.
           if !warnedOverrun, started.duration(to: .now) > .milliseconds(WakeScoreModel.strideMs) {
             warnedOverrun = true
             log.warn("wake scoring slower than real time; events will lag")
-          }
-          for score in scores {
-            model.receive(score)
           }
         } catch {
           let cancelled = Task.isCancelled
@@ -174,6 +184,8 @@ final class WakeFeed {
           print(Thread.callStackSymbols.prefix(12).joined(separator: "\n"))
         }
       }
+      // Ends `scores` and `events`, so the model and agent loops finish too.
+      monitor.finish()
     }
   }
 

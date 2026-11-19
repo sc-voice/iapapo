@@ -11,7 +11,8 @@ import VACore
 
 /// Root view with a Home tab and a Developer tab.
 struct ContentView: View {
-  @State private var chatState: VAState = .inactive
+  /// The app's one conversation state, owned by the global voice agent.
+  private var chatState: VAState { voiceAgent.state }
   @State private var log: EventLog
   @State private var cues: CuePlayer
   @State private var session: AudioSessionModel
@@ -35,19 +36,16 @@ struct ContentView: View {
   @Environment(\.scenePhase) private var scenePhase
 
   init() {
-    let log = EventLog()
+    let log = appLog
     let session = AudioSessionModel(log: log)
     let speech = SpeechModel(log: log)
     let microphone = Microphone(log: log, session: session)
     let recorder = ClipRecorder(log: log)
     let wakeScores = WakeScoreModel()
-    let wake = WakeFeed(model: wakeScores, log: log)
     let cues = CuePlayer(log: log)
-    let speaker = Speaker(log: log)
-    wakeScores.onWakeRun = {
-      // cues.perform(.sound(.assistant))
-      speaker.say("IaPapo hears you!")
-    }
+    let speaker = voiceSpeaker
+    let agent = voiceAgent
+    let wake = WakeFeed(model: wakeScores, log: log, agent: agent, settings: appSettings)
     // Every captured buffer goes to the analyzer, the sample recorder and the
     // wake scorer. Each drops it when idle.
     microphone.onBuffer = { [weak microphone] buffer in
@@ -146,6 +144,25 @@ struct ContentView: View {
     }
   }
 
+  /// Moves to a state picked from the icon bar. Inactive goes through the mic
+  /// button's path so the agent is disabled too.
+  private func select(_ target: VAState) {
+    if target == .inactive {
+      toggleAgent()
+    } else {
+      enter(target)
+    }
+  }
+
+  /// Sends the enable or disable event for the voice agent, then enters the
+  /// matching state so the mic and cues follow.
+  private func toggleAgent() {
+    let active = chatState != .inactive
+    let event = VAEvent(verb: active ? .disable : .enable, noun: .voiceAgent)
+    Task { await voiceAgent.send(event) }
+    enter(active ? .inactive : .idle)
+  }
+
   /// Enters `state` if the state machine allows it. The mic stops before the
   /// session changes and
   /// starts after, so the category change never happens while capture is
@@ -171,7 +188,7 @@ struct ContentView: View {
     }
     let step = result.step
     log.info("state \(chatState) -> \(step.state)")
-    chatState = step.state
+    voiceAgent.setState(step.state)
     if step.state == .inactive {
       microphone.stop()
       speech.stop()
@@ -195,7 +212,13 @@ struct ContentView: View {
   var body: some View {
     TabView {
       Tab("Home", systemImage: "house") {
-        HomeView()
+        HomeView(
+          state: chatState,
+          microphone: microphone,
+          speech: speech,
+          onMicTap: toggleAgent,
+          onSelect: select,
+        )
       }
       Tab("Developer", systemImage: "hammer") {
         DeveloperView(
@@ -280,13 +303,202 @@ struct ContentView: View {
   }
 }
 
-/// Shows the agent name as a large title.
+/// Shows the agent name as a large title, with the microphone button and the
+/// agent view under it.
 struct HomeView: View {
+  let state: VAState
+  let microphone: Microphone
+  let speech: SpeechModel
+  let onMicTap: () -> Void
+  let onSelect: (VAState) -> Void
+  /// Whether the arrow and icon bar are visible.
+  @State private var barShown = true
+  /// Pending fade-out, cancelled when the user engages again.
+  @State private var fadeTask: Task<Void, Never>?
+
+  /// Shows the icon bar and restarts the 10-second fade-out timer.
+  private func showBar() {
+    fadeTask?.cancel()
+    withAnimation(.easeIn(duration: 0.3)) { barShown = true }
+    fadeTask = Task {
+      try? await Task.sleep(for: .seconds(10))
+      guard !Task.isCancelled else { return }
+      withAnimation(.easeOut(duration: 0.5)) { barShown = false }
+    }
+  }
+
   var body: some View {
-    Text(VAConfig().agentName)
-      .font(.system(size: 72, weight: .bold))
-      .minimumScaleFactor(0.5)
-      .padding()
+    VStack(spacing: 32) {
+      Text(VAConfig().agentName)
+        .font(.system(size: 72, weight: .bold))
+        .minimumScaleFactor(0.5)
+      HStack(spacing: 0) {
+        MicButton(
+          state: state,
+          micOn: microphone.isOn,
+          level: microphone.level,
+          denied: microphone.isDenied,
+          waiting: (state != .inactive && !microphone.isOn)
+            || speech.modelStatus == "downloading",
+          action: {
+            showBar()
+            onMicTap()
+          },
+        )
+        // The gap sits inside the bar, so a hidden bar adds no width and the
+        // button stays centered.
+        // Faded-out bars leave the layout, so the button recenters.
+        if state != .inactive && barShown {
+          HStack(spacing: 24) {
+            Image(systemName: "arrow.right")
+              .font(.system(size: 36))
+            AgentView(state: state, onSelect: { target in
+              showBar()
+              onSelect(target)
+            })
+          }
+          .padding(.leading, 24)
+          .transition(.opacity)
+        }
+      }
+      .animation(.easeInOut(duration: 0.3), value: state != .inactive)
+    }
+    .padding()
+    .onAppear { showBar() }
+    .onChange(of: state) { _, _ in showBar() }
+  }
+}
+
+/// The microphone button that turns the voice agent on and off. The ring shows
+/// the mic level while the mic is on. A spinner replaces the icon while waiting.
+/// When permission is denied the button is disabled and shows a red outline.
+struct MicButton: View {
+  /// The current agent state. The icon follows it while active.
+  let state: VAState
+  /// Whether the microphone is capturing.
+  let micOn: Bool
+  /// Microphone level in dBFS.
+  let level: Float
+  /// Whether microphone permission is denied.
+  let denied: Bool
+  /// Whether the button must wait, such as while the mic starts or a speech
+  /// model downloads.
+  let waiting: Bool
+  /// Called when the user taps the button.
+  let action: () -> Void
+
+  /// The symbol at `tick`: a red slash when denied, the mic when inactive, and
+  /// the current state's symbol when active.
+  /// - Parameter tick: the whole second, passed to `AgentView.symbol`.
+  private func icon(tick: Int) -> String {
+    if denied { return "mic.slash" }
+    if state == .inactive { return "mic" }
+    return AgentView.symbol(for: state, tick: tick)
+  }
+
+  var body: some View {
+    Button(action: action) {
+      TimelineView(.animation) { context in
+        let seconds = context.date.timeIntervalSinceReferenceDate
+        let tick = Int(seconds)
+        LevelRing(
+          value: micOn
+            ? Double((level - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
+            : 0,
+          fill: .green,
+        )
+        .overlay {
+          if waiting && !denied {
+            ProgressView()
+          } else {
+            Image(systemName: icon(tick: tick))
+              .font(.system(size: 36))
+              .foregroundStyle(
+                denied ? .red : state == .inactive ? .primary : AgentView.idleColor(at: seconds)
+              )
+          }
+        }
+      }
+    }
+    .buttonStyle(.plain)
+    .disabled(denied || waiting)
+  }
+}
+
+/// A bar of icons for the states the user can move to next. Tapping one enters
+/// that state. Paired symbols flip every second with a fade.
+struct AgentView: View {
+  let state: VAState
+  /// Called with the state the user taps.
+  let onSelect: (VAState) -> Void
+
+  /// The states reachable from `state` in one step, per the state diagram in
+  /// the design doc. The current state is never included.
+  /// - Parameter state: the current state.
+  static func permittedNext(from state: VAState) -> [VAState] {
+    switch state {
+    case .inactive: [.idle]
+    case .idle: [.listening, .inactive]
+    case .listening: [.speaking, .idle, .inactive]
+    case .thinking: [.speaking, .idle]
+    case .speaking: [.listening, .idle]
+    }
+  }
+
+  var body: some View {
+    TimelineView(.animation) { context in
+      let seconds = context.date.timeIntervalSinceReferenceDate
+      let tick = Int(seconds)
+      // One full turn every 4 seconds.
+      let spin = Angle.degrees(seconds.truncatingRemainder(dividingBy: 4) / 4 * 360)
+      let idleColor = AgentView.idleColor(at: seconds)
+      HStack(spacing: 24) {
+        ForEach(Self.permittedNext(from: state), id: \.self) { icon in
+          Button {
+            onSelect(icon)
+          } label: {
+            Image(systemName: Self.symbol(for: icon, tick: tick))
+              .font(.system(size: 36))
+              .contentTransition(.opacity)
+              .rotationEffect(icon == .thinking ? spin : .zero)
+              .foregroundStyle(icon == .idle ? idleColor : .primary)
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .animation(.easeInOut(duration: 0.5), value: tick)
+      .padding(.horizontal, 20)
+      .padding(.vertical, 12)
+      .overlay {
+        // The cartouche: a rounded outline around the state icons.
+        RoundedRectangle(cornerRadius: 28)
+          .stroke(.secondary, lineWidth: 2)
+      }
+    }
+  }
+
+  /// The idle icon color at `seconds`. Fades to green over 2 seconds, holds 2
+  /// seconds, and fades back over 2 seconds, repeating every 6 seconds.
+  /// - Parameter seconds: time since the reference date.
+  static func idleColor(at seconds: Double) -> Color {
+    let phase = seconds.truncatingRemainder(dividingBy: 6)
+    let breathe = phase < 2 ? phase / 2 : phase < 4 ? 1 : (6 - phase) / 2
+    return Color(.systemBackground).mix(with: .green, by: breathe)
+  }
+
+  /// The SF Symbol for `state`. Paired symbols alternate on each tick.
+  /// - Parameters:
+  ///   - state: the state to draw.
+  ///   - tick: the whole second, used to pick the filled or outline variant.
+  static func symbol(for state: VAState, tick: Int) -> String {
+    let filled = (tick / 2).isMultiple(of: 2)
+    switch state {
+    case .inactive: return "mic.slash"
+    case .idle: return "apple.meditate"
+    case .listening: return filled ? "ear.fill" : "ear"
+    case .thinking: return filled ? "puzzlepiece.extension.fill" : "puzzlepiece.extension"
+    case .speaking: return filled ? "speaker.wave.2.bubble.fill" : "speaker.wave.2.bubble"
+    }
   }
 }
 
@@ -367,6 +579,8 @@ struct DeveloperView: View {
         wakeScore: wakeScores.shown,
         wakeWord: wakeScores.wakeWord,
         ambientDb: wakeScores.ambientDb,
+        windowDb: wakeScores.windowDb,
+        gateOpen: wakeScores.gateOpen,
         micHistory: wakeScores.micHistory,
         scoreHistory: wakeScores.scoreHistory,
         wakeHistory: wakeScores.wakeHistory,

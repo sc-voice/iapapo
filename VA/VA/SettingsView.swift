@@ -20,7 +20,8 @@ final class VoicePreviewer {
 
 /// Settings screen: voice selection grouped by quality, with a preview button per voice.
 struct SettingsView: View {
-  @AppStorage("voiceIdentifier") private var voiceID = ""
+  @AppStorage(UserDefaultsSettings.voiceIdentifierKey) private var voiceID = ""
+  @AppStorage(UserDefaultsSettings.ambientWakeDbKey) private var ambientWakeDb = UserDefaultsSettings.defaultAmbientWakeDb
   @State private var previewer = VoicePreviewer()
 
   /// Voices for the system locale's language, grouped by quality (highest first) and sorted by name.
@@ -50,6 +51,18 @@ struct SettingsView: View {
               }
             }
           }
+        }
+        Section {
+          HStack {
+            Slider(value: $ambientWakeDb, in: 0 ... 10, step: 0.5)
+            Text(ambientWakeDb.formatted(.number.precision(.fractionLength(1))))
+              .monospacedDigit()
+              .frame(width: 40, alignment: .trailing)
+          }
+        } header: {
+          Text("Ambient wake margin (dB)")
+        } footer: {
+          Text("The window level must rise this far above the ambient floor to open the wake gate.")
         }
       }
       .navigationTitle("Settings")

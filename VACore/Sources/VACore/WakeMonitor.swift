@@ -39,7 +39,7 @@ public struct WakeMonitor {
   /// Samples per ambient hop at 48 kHz: 0.25 s.
   private static let hopSamples = 12_000
   /// Starting ambient floor in dBFS, a typical quiet room, before any hop.
-  static let ambientSilenceDb: Float = -60
+  public static let ambientSilenceDb: Float = -80
   /// Share of the gap to each new hop level. 1 - 0.5^(0.25 / 1.5), about 0.109.
   static let ambientAlpha: Float = 1 - pow(0.5, 0.25 / 1.5)
 
@@ -48,8 +48,8 @@ public struct WakeMonitor {
   private let stride: Int
   /// Probability at or above which, with the gate open, an event's `wakeWord` is true.
   private let wakeLevel: Float
-  /// dB the window level must rise above the ambient floor to open the gate.
-  private let ambientWakeDb: Float
+  /// Source of the gate margin, read on each window.
+  private let settings: any AppSettings
   private var resampler = Resampler48To16()
   private var cutter: HopCutter
   private var window: SlidingWindow
@@ -73,10 +73,25 @@ public struct WakeMonitor {
   private var hopSquares: Double = 0
   private var hopCount = 0
   /// Gate state. Open when `windowDb` exceeds `ambientDb` by at least
-  /// `ambientWakeDb`. Starts open until the first window is scored. The ambient
+  /// `settings.ambientWakeDb`. Starts open until the first window is scored. The ambient
   /// floor does not yet freeze while the gate is open.
   private var gateOpen = true
+  /// Decides which scores produce an event.
+  private var rule: any WakeEventRule
+  /// One score per stride, newest 64 kept, for main-actor observers.
+  public let scores: AsyncStream<WakeScore>
+  /// Wake events from the rule, for the state machine. Unbounded, so no event
+  /// is dropped.
+  public let events: VAEventStream
+  private let scoreOut: AsyncStream<WakeScore>.Continuation
+  private let eventOut: VAEventStream.Continuation
 
+  /// Stride the training grid uses, in ms: 4000 samples at 16 kHz. The Python
+  /// parity tests need this value, and every other stride is compared with it.
+  public static let trainingStrideMs = 250
+  /// Stride the app runs in production, in ms. Five times the scoring work of
+  /// the training stride, so a run of four is 200 ms.
+  public static let productionStrideMs = 50
   /// Wake level used when the caller does not set one.
   public static let defaultWakeLevel: Float = 0.9
   /// Ambient wake margin used when the caller does not set one, in dB.
@@ -86,16 +101,18 @@ public struct WakeMonitor {
   ///   - scorer: the scorer whose model and window probability the monitor uses.
   ///   - strideMs: milliseconds between window starts, and between events. Must
   ///   be a positive multiple of 10 ms, the frame period, so frames align across
-  ///   strides. Defaults to the training grid's 250 ms (4000 samples).
+  ///   strides. Defaults to `trainingStrideMs`.
   ///   - wakeLevel: probability at or above which, with the gate open, an event's
   ///   `wakeWord` is true.
-  ///   - ambientWakeDb: dB the window level must rise above the ambient floor
-  ///   to open the gate.
+  ///   - settings: supplies the dB the window level must rise above the ambient
+  ///   floor to open the gate, read on each window.
+  ///   - rule: decides which scores produce an event on `events`.
   public init(
     scorer: WakeScorer,
-    strideMs: Int = 250,
+    strideMs: Int = WakeMonitor.trainingStrideMs,
     wakeLevel: Float = WakeMonitor.defaultWakeLevel,
-    ambientWakeDb: Float = WakeMonitor.defaultAmbientWakeDb,
+    settings: any AppSettings = FixedSettings(),
+    rule: any WakeEventRule = StrideRunRule(),
   ) {
     precondition(
       strideMs > 0 && strideMs % 10 == 0,
@@ -104,13 +121,29 @@ public struct WakeMonitor {
     let stride = strideMs * LogMelFrontEnd.sampleRate / 1000
     self.scorer = scorer
     self.wakeLevel = wakeLevel
-    self.ambientWakeDb = ambientWakeDb
+    self.settings = settings
     self.stride = stride
     cutter = HopCutter(hopLength: stride)
     window = SlidingWindow(length: scorer.windowLength, step: stride)
     let windowSeconds = Double(scorer.windowLength) / Double(LogMelFrontEnd.sampleRate)
     let hopSeconds = Double(Self.hopSamples) / 48_000
     windowAlpha = Float(1 - pow(0.5, hopSeconds / (windowSeconds / 2)))
+    self.rule = rule
+    let (scoreStream, scoreContinuation) = AsyncStream.makeStream(
+      of: WakeScore.self,
+      bufferingPolicy: .bufferingNewest(64)
+    )
+    scores = scoreStream
+    scoreOut = scoreContinuation
+    let (eventStream, eventContinuation) = AsyncStream.makeStream(of: VAEvent.self)
+    events = eventStream
+    eventOut = eventContinuation
+  }
+
+  /// Closes `scores` and `events`. Call when the audio source ends.
+  public func finish() {
+    scoreOut.finish()
+    eventOut.finish()
   }
 
   /// Adds 48 kHz mono samples to the stream.
@@ -145,7 +178,7 @@ public struct WakeMonitor {
   private mutating func advance(hop: [Float]) async throws -> WakeScore {
     try await scoreWindows(window.process(hop))
     strides += 1
-    return WakeScore(
+    let score = WakeScore(
       probability: currentProbability,
       windowIndex: scored - 1,
       endSeconds: Double(stride * strides) / Double(LogMelFrontEnd.sampleRate),
@@ -155,6 +188,11 @@ public struct WakeMonitor {
       gateOpen: gateOpen,
       wakeWord: currentProbability >= wakeLevel && gateOpen,
     )
+    scoreOut.yield(score)
+    if let event = rule.event(for: score) {
+      eventOut.yield(event)
+    }
+    return score
   }
 
   /// Scores windows in order, keeping the latest probability.
@@ -163,7 +201,7 @@ public struct WakeMonitor {
       currentProbability = try await scorer.probability(of: samples)
       scored += 1
       if let level = windowDb, let floor = ambientDb {
-        gateOpen = level - floor >= ambientWakeDb
+        gateOpen = level - floor >= settings.ambientWakeDb
       }
     }
   }

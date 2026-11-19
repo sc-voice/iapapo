@@ -65,30 +65,30 @@ private func entrySound(for state: VAState) -> Sound? {
 /// Events with no row for the current state leave the state unchanged and
 /// produce no effects.
 public func transition(from state: VAState, on event: VAEvent) -> Step {
-  switch (state, event) {
-  case (.inactive, .hidOn):
+  switch (state, event.verb, event.noun) {
+  case (.inactive, .enable, .voiceAgent):
     transition(to: .idle, sound: .on)
-  case (.idle, .heardWakeWord):
+  case (.idle, .sensed, .wakeup):
     transition(to: .listening, sound: .assistant)
-  case (.idle, .hidOff):
-    transition(to: .inactive)
-  case (.listening, .utterance(.quick)), (.listening, .utterance(.valid)):
+  case (.idle, .disable, .voiceAgent), (.listening, .disable, .voiceAgent):
+    transition(to: .inactive, sound: .off)
+  case (.listening, .sensed, .quickPrompt), (.listening, .sensed, .validPrompt):
     transition(to: .thinking)
-  case (.listening, .utterance(.invalid)):
+  case (.listening, .sensed, .invalidPrompt):
     transition(to: .speaking, before: [.speakClarifyRequest])
-  case (.listening, .listenTimeout), (.listening, .heardIdleWord):
+  case (.listening, .sensed, .listenTimeout), (.listening, .sensed, .idleWord):
     transition(to: .idle)
-  case (.thinking, .llmResponseReady):
+  case (.thinking, .sensed, .llmResponseReady):
     transition(to: .speaking)
-  case (.thinking, .llmFailed):
+  case (.thinking, .sensed, .llmFailed):
     transition(to: .idle, sound: .error, before: [.cancelThink])
-  case (.thinking, .heardIdleWord):
+  case (.thinking, .sensed, .idleWord):
     transition(to: .idle, before: [.cancelThink])
-  case (.speaking, .heardIdleWord):
+  case (.speaking, .sensed, .idleWord):
     transition(to: .idle, before: [.cancelSpeech])
-  case (.speaking, .audioFinished):
+  case (.speaking, .sensed, .audioFinished):
     transition(to: .listening)
-  case (.speaking, .heardWakeWord):
+  case (.speaking, .sensed, .wakeup):
     transition(to: .listening, sound: .assistant, before: [.cancelSpeech])
   default:
     Step(state: state, effects: [])

@@ -33,6 +33,11 @@ private struct MicMonitorView: View {
   let wakeWord: Bool
   /// Ambient floor in dBFS, or nil before the first hop.
   let ambientDb: Float?
+  /// Smoothed window level in dBFS, shown beside the ambient floor, or nil before the first hop.
+  let windowDb: Float?
+  /// Whether the window level is clearly above the ambient floor. The mic ring
+  /// is green when true and gray when false.
+  let gateOpen: Bool
   /// Microphone level in dBFS per event, newest first, for the history chart.
   let micHistory: [Float]
   /// Raw wake score per event, newest first, for the history chart.
@@ -86,11 +91,13 @@ private struct MicMonitorView: View {
   private var micRing: some View {
     VStack(spacing: 4) {
       LevelRing(
-        value: microphoneOn ? Double((level + 60) / 60) : 0,
+        value: microphoneOn
+          ? Double((level - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
+          : 0,
         track: microphoneOn
           ? Color(.quaternarySystemFill)
           : Color(red: 0.5, green: 0.5, blue: 0.5),
-        fill: .green
+        fill: gateOpen ? .green : .gray
       )
       .overlay {
         Button(action: onMicTap) {
@@ -123,7 +130,9 @@ private struct MicMonitorView: View {
         scoreHistory: scoreHistory,
         wakeHistory: wakeHistory,
         isOn: microphoneOn,
-        ambientDb: ambientDb
+        ambientDb: ambientDb,
+        windowDb: windowDb,
+        gateOpen: gateOpen
       )
       Button("Next", action: onNext)
         .buttonStyle(.borderedProminent)
@@ -146,6 +155,10 @@ struct TrainingWizard: View {
   let wakeWord: Bool
   /// Ambient floor in dBFS, shown under the wake score ring, or nil before the first hop.
   let ambientDb: Float?
+  /// Smoothed window level in dBFS, shown beside the ambient floor, or nil before the first hop.
+  let windowDb: Float?
+  /// Whether the window level is clearly above the ambient floor, for the mic ring's color.
+  let gateOpen: Bool
   /// Microphone level in dBFS per event, newest first, for the mic check charts.
   let micHistory: [Float]
   /// Raw wake score per event, newest first, for the mic check charts.
@@ -234,6 +247,8 @@ struct TrainingWizard: View {
             wakeScore: wakeScore,
             wakeWord: wakeWord,
             ambientDb: ambientDb,
+            windowDb: windowDb,
+            gateOpen: gateOpen,
             micHistory: micHistory,
             scoreHistory: scoreHistory,
             wakeHistory: wakeHistory,

@@ -50,9 +50,9 @@ With longPrompt, we also need an idleWord that would bring the agent to IDLE onc
 ```mermaid
 stateDiagram-v2
     [*] --> INACTIVE
-    INACTIVE -> IDLE : onHIDInput(on) → cue(soundOn)
+    INACTIVE -> IDLE : onEnableAgent(on) → mic(on), cue(soundOn)
     IDLE --> LISTENING : onHear(wakeWord) → cue(soundListen)
-    IDLE -> INACTIVE : onHIDInput(off) → cue(soundOff)
+    IDLE -> INACTIVE : onDisableAgent(off) → mic(off), cue(soundOff)
     LISTENING --> THINKING : quickPrompt 
     LISTENING --> THINKING : validPrompt and endPromptTimeout
     LISTENING --> SPEAKING : invalidPrompt and endPromptTimeout → speak(clarifyRequest)
@@ -108,7 +108,6 @@ In particular, Apple provides tools for TTS, STT and even has a tiny LLM on iOS 
 A SwiftUI `TabView` with two tabs:
 - **Home:** the agent name "IaPapo" as a large title.
 - **Developer:** live view of the ChatState, InputState (microphone ON/OFF), and the cue now playing (fades out when the cue ends), plus the prompt as it is being spoken and processed.
-- The ChatState row is a dropdown. Choosing a state enters it through the unconditional entry transition, so its feedback plays.
 
 ### STT Vocabulary
 
@@ -118,11 +117,7 @@ Domain terms must survive speech-to-text: "Chaat" is heard, "CHAT" is wanted. Tw
 
 ### Feedback
 
-Every entry into a state gives user feedback. Feedback is an effect that the app performs, through a `Feedback` interface, so tests can record cues without audio.
-- **Entry cues:** inactive → off, idle → idle, listening → listen, thinking → thinking, speaking → speaking.
-- **Path cues:** hidOn → idle plays on instead of idle. llmFailed → idle plays error instead of idle.
-- **Exit effects:** leaving thinking cancels the LLM call; leaving speaking cancels speech. These run before the entry cue.
-- Cues are short `.m4a` files in the app bundle, generated with the macOS `say` command where no recording existed.
+State transitions tirgger e.g., `VAEvents(verb:.notifyu, noun:("state-idle"))` that are emitted to trigger user feedback.
 
 ### Decisions
 - Remote client required: iPhone, iPad, and the M4 Mac can each act as voice agent front end.

@@ -27,6 +27,11 @@ struct WakeHistoryView<MicRing: View, WakeRing: View>: View {
   /// Ambient floor in dBFS, or nil before the first hop. Shown faintly over the
   /// microphone bar chart.
   let ambientDb: Float?
+  /// Smoothed window level in dBFS, shown to the right of the ambient floor, or nil before the first hop.
+  let windowDb: Float?
+  /// Whether the window level is clearly above the ambient floor. The window
+  /// level shows green when true.
+  let gateOpen: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -42,13 +47,17 @@ struct WakeHistoryView<MicRing: View, WakeRing: View>: View {
             height: LevelRing.diameter,
           )
           .overlay(alignment: .topLeading) {
-            Text(ambientDb.map { String(format: "%.1f", $0) } ?? "—")
-              .font(.system(size: 25))
-              .monospacedDigit()
-              .foregroundStyle(.secondary)
-              .opacity(1)
-              .padding(.leading, 4)
-              .allowsHitTesting(false)
+            HStack(spacing: 16) {
+              Text(ambientDb.map { String(format: "%.1f", $0) } ?? "—")
+              Text(windowDb.map { String(format: "%.1f", $0) } ?? "—")
+                .foregroundStyle(gateOpen ? .green : .secondary)
+            }
+            .font(.system(size: 25))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .opacity(1)
+            .padding(.leading, 4)
+            .allowsHitTesting(false)
           }
         }
       }

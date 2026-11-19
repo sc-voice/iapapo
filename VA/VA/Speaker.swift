@@ -4,11 +4,13 @@
 //
 
 import AVFoundation
+import VACore
 
 /// Speaks short confirmations on device with `AVSpeechSynthesizer`.
 final class Speaker {
   private let synthesizer = AVSpeechSynthesizer()
   private let log: EventLog
+  private let settings: any AppSettings
   /// Fallback voice when Settings has none: the Siri en-US female voice, or the
   /// highest-quality installed en-US voice as `scv-app` picks by quality.
   private static let defaultVoice: AVSpeechSynthesisVoice? = AVSpeechSynthesisVoice(
@@ -19,9 +21,9 @@ final class Speaker {
     .max { $0.quality.rawValue < $1.quality.rawValue }
     ?? AVSpeechSynthesisVoice(language: "en-US")
 
-  /// The voice `say` uses, read from the Settings voice on each call so changes apply at once.
+  /// The voice `say` uses, read from the settings on each call so changes apply at once.
   var voice: AVSpeechSynthesisVoice? {
-    if let id = UserDefaults.standard.string(forKey: "voiceIdentifier"),
+    if let id = settings.voiceIdentifier,
       let saved = AVSpeechSynthesisVoice(identifier: id)
     {
       return saved
@@ -29,9 +31,12 @@ final class Speaker {
     return Self.defaultVoice
   }
 
-  /// - Parameter log: records each phrase spoken.
-  init(log: EventLog) {
+  /// - Parameters:
+  ///   - log: records each phrase spoken.
+  ///   - settings: supplies the voice identifier.
+  init(log: EventLog, settings: any AppSettings) {
     self.log = log
+    self.settings = settings
     // Log every installed voice to the Xcode console, Siri voices first, then
     // highest quality.
     let voices = AVSpeechSynthesisVoice.speechVoices().sorted { a, b in
@@ -67,5 +72,13 @@ final class Speaker {
     let utterance = AVSpeechUtterance(string: text)
     utterance.voice = voice
     synthesizer.speak(utterance)
+  }
+}
+
+/// Speaks the acknowledgement of a wake word. Other actions are ignored.
+extension Speaker: VAActor {
+  func perform(_ event: VAEvent) async {
+    guard event.verb == .acknowledge, event.noun == .wakeup else { return }
+    say("IaPapo hears you!")
   }
 }
