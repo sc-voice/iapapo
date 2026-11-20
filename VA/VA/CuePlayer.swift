@@ -9,8 +9,9 @@ import VACore
 
 /// Plays cue sounds from the app bundle and publishes the cue that is audible
 /// now.
+@MainActor
 @Observable
-final class CuePlayer: Feedback {
+final class CuePlayer: VAActor {
   /// The cue currently audible, or nil when silent.
   private(set) var nowPlaying: Sound?
   /// The most recent cue, kept so its name can fade out after it stops.
@@ -22,12 +23,28 @@ final class CuePlayer: Feedback {
     self.log = log
   }
 
-  func perform(_ effect: Effect) {
-    guard case let .sound(sound) = effect else { return }
+  /// Plays the cue for each `notify` event. Nouns with no cue, and other
+  /// actions, are silent.
+  func perform(_ event: VAEvent) async {
+    guard event.action == .notify, let sound = Self.cues[event.noun] else { return }
     PlaybackQueue.shared.enqueue { [weak self] in
       await self?.play(sound)
     }
   }
+
+  /// The cue each notification plays by default. User settings will choose the
+  /// channel later.
+  private static let cues: [VANoun: Sound] = [
+    .agentEnabled: .on,
+    .agentDisabled: .off,
+    .wakeWordHeard: .assistant,
+    .listeningStarted: .listen,
+    .thinkingStarted: .thinking,
+    .speakingStarted: .speaking,
+    .idleStarted: .idle,
+    .requestFailed: .error,
+    .attentionNeeded: .attention,
+  ]
 
   /// Returns when every cue queued so far has finished, or at once if none is
   /// playing.

@@ -3,17 +3,15 @@ import Testing
 
 private let allAvailable = Availability(microphone: true, speech: .installed)
 
-@Test func microphoneBlocksBeforeSpeech() {
+@Test func microphoneDoesNotBlockEntry() {
   #expect(entryBlock(
     for: .idle,
     availability: Availability(microphone: false, speech: .installed),
-  )
-    == .microphoneDenied)
+  ) == nil)
   #expect(entryBlock(
     for: .idle,
     availability: Availability(microphone: false, speech: .unavailable),
-  )
-    == .microphoneDenied)
+  ) == .speechUnavailable)
 }
 
 @Test func unavailableSpeechBlocksWhenMicrophoneIsAvailable() {
@@ -46,11 +44,11 @@ private let allAvailable = Availability(microphone: true, speech: .installed)
 @Test func blockedEntryStaysAndCuesError() {
   let result = transition(to: .idle, from: .inactive,
                           availability: Availability(
-                            microphone: false,
-                            speech: .installed,
+                            microphone: true,
+                            speech: .unavailable,
                           ))
-  #expect(result.step == Step(state: .inactive, effects: [.sound(.error)]))
-  #expect(result.block == .microphoneDenied)
+  #expect(result.step == Step(state: .inactive, notifications: [.requestFailed]))
+  #expect(result.block == .speechUnavailable)
 }
 
 @Test func missingSpeechModelPlaysAttentionNotError() {
@@ -59,7 +57,7 @@ private let allAvailable = Availability(microphone: true, speech: .installed)
                             microphone: true,
                             speech: .notInstalled,
                           ))
-  #expect(result.step == Step(state: .inactive, effects: [.sound(.attention)]))
+  #expect(result.step == Step(state: .inactive, notifications: [.attentionNeeded]))
   #expect(result.block == .speechModelNotInstalled)
 }
 
@@ -69,6 +67,6 @@ private let allAvailable = Availability(microphone: true, speech: .installed)
     from: .inactive,
     availability: allAvailable,
   )
-  #expect(result.step == Step(state: .idle, effects: [.sound(.idle)]))
+  #expect(result.step == Step(state: .idle, notifications: [.idleStarted]))
   #expect(result.block == nil)
 }

@@ -1,69 +1,129 @@
 import Observation
 
-/// Turns input events into output events and keeps the conversation state. The
-/// reaction logic in `react(to:)` is synchronous and deterministic; `run(_:)`
-/// only connects it to streams and actors. Observable, so views follow `state`.
+/// A reacting orchestrator: it turns input events into output events, keeps the
+/// conversation state across them, and performs each output on every actor. The
+/// policy in `react(to:)` is synchronous and deterministic (a fixed transition
+/// table, not a model's choice). `send(_:)` queues an event; a loop started at
+/// construction reacts to queued events in order. Observable, so views follow
+/// `state`.
 @MainActor
 @Observable
 public final class VAAgent {
   /// The conversation state after the last input event.
   public private(set) var state: VAState = .inactive
   private let actors: [any VAActor]
+  /// The primary input stream, created with the agent. `send` yields into it.
+  private let inputStream: VAEventStream
+  private let inputContinuation: VAEventStream.Continuation
+  /// Whether the mic can be used. Without it, enabling goes to listening, not idle.
+  private var micAvailable = true
+  /// Read on each start of the listen timeout, so Settings changes apply at once.
+  private let settings: any AppSettings
+  /// Sends idle when the listen timeout ends. Replaced on each signal.
+  private var listenWatch: Task<Void, Never>?
 
-  /// - Parameter actors: every actor that receives each output event.
-  public init(actors: [any VAActor]) {
+  /// Creates the agent and starts reacting to queued events.
+  /// - Parameters:
+  ///   - actors: every actor that receives each output event.
+  ///   - settings: supplies the listen timeout.
+  public init(actors: [any VAActor], settings: any AppSettings = FixedSettings()) {
     self.actors = actors
+    self.settings = settings
+    let (stream, continuation) = VAEventStream.makeStream()
+    inputStream = stream
+    inputContinuation = continuation
+    Task { await self.consume(self.inputStream) }
   }
 
-  /// Sets the state directly. The app's entry transition uses this, so the
-  /// agent stays the one source of state.
-  /// - Parameter state: the state to enter.
-  public func setState(_ state: VAState) {
-    self.state = state
+  /// Queues one event. Returns at once; the agent reacts in order.
+  /// - Parameter event: the event to react to.
+  public func send(_ event: VAEvent) {
+    inputContinuation.yield(event)
   }
 
-  /// Reacts to each input event in order until `events` finishes. Each output
-  /// event runs in its own task, so a slow actor does not hold up later input.
-  /// Returns once every output event has been performed.
-  public func run(_ events: VAEventStream) async {
-    var pending: [Task<Void, Never>] = []
+  /// Reacts to each queued event in order, performing each output on every actor
+  /// before the next event. Runs for the life of the agent.
+  /// - Parameter events: the queued input.
+  private func consume(_ events: VAEventStream) async {
     for await event in events {
       for output in react(to: event) {
-        pending.append(Task {
-          for actor in self.actors {
-            await actor.perform(output)
-          }
-        })
-      }
-    }
-    for task in pending {
-      await task.value
-    }
-  }
-
-  /// Reacts to one event sent from the UI, performing its outputs on every actor.
-  /// - Parameter event: the event to react to.
-  public func send(_ event: VAEvent) async {
-    for output in react(to: event) {
-      for actor in actors {
-        await actor.perform(output)
+        for actor in actors {
+          await actor.perform(output)
+        }
       }
     }
   }
 
-  /// The output events one input event produces, and the state it leaves. Only
-  /// `sensed`, `enable` and `disable` events are reactions: output events are
-  /// ignored, so the agent never answers its own output. A wake word always
-  /// acknowledges, whatever the state, as the feed did before.
-  /// - Parameter event: the next input event.
+  /// The output events one input event produces, and the state it leaves.
+  /// - `set` moves to the state named by its value, with that state's entry
+  ///   notification. Setting the current state does nothing.
+  /// - `notify` is passed to the actors unchanged.
+  /// - `sensed`, `enable` and `disable` follow the transition table. An inactive
+  ///   agent ignores `sensed`, so only `enable` activates it. A wake word
+  ///   acknowledges in any state where it is heard.
+  /// - `done` is an output, so it is ignored: the agent never answers its own output.
+  /// - Parameter event: the next event.
   /// - Returns: the output events to perform, possibly none.
   func react(to event: VAEvent) -> [VAEvent] {
-    guard event.verb == .sensed || event.verb == .enable || event.verb == .disable
-    else { return [] }
-    state = transition(from: state, on: event).state
-    if event.noun == .wakeup {
-      return [.acknowledge(.wakeup)]
+    switch event.action {
+    case .notify:
+      return [event]
+    case .set:
+      if event.noun == .micAvailable {
+        micAvailable = event.value == "true"
+        return []
+      }
+      guard event.noun == .voiceAgentState,
+            let value = event.value,
+            let target = VAState(rawValue: value),
+            target != state
+      else { return [] }
+      return apply(transition(to: target))
+    case .sensed, .enable, .disable:
+      if state == .inactive && event.action == .sensed { return [] }
+      if state == .inactive && event.action == .enable && !micAvailable {
+        return apply(transition(to: .listening, notify: [.agentEnabled]))
+      }
+      var outputs = apply(transition(from: state, on: event))
+      if event.noun == .wakeup {
+        outputs.append(.done(.wakeup))
+      }
+      return outputs
+    case .done:
+      return []
     }
-    return []
+  }
+
+  /// Records a signal above the wake threshold. While listening, it restarts the
+  /// listen timeout.
+  public func heard() {
+    guard state == .listening else { return }
+    startListenWatch()
+  }
+
+  /// Moves to the step's state and returns its notifications as outputs. Entering
+  /// listening starts the listen timeout; leaving it cancels the timeout.
+  /// - Parameter step: the transition to apply.
+  /// - Returns: one `notify` event per notification, in order.
+  private func apply(_ step: Step) -> [VAEvent] {
+    state = step.state
+    if state == .listening {
+      startListenWatch()
+    } else {
+      listenWatch?.cancel()
+    }
+    return step.notifications.map { VAEvent(action: .notify, noun: $0) }
+  }
+
+  /// Restarts the listen timeout. When it ends, the agent sends itself a `set` to
+  /// idle.
+  private func startListenWatch() {
+    listenWatch?.cancel()
+    let timeout = Duration.seconds(settings.listenTimeout)
+    listenWatch = Task {
+      try? await Task.sleep(for: timeout)
+      guard !Task.isCancelled else { return }
+      send(VAEvent(action: .set, noun: .voiceAgentState, value: VAState.idle.rawValue))
+    }
   }
 }

@@ -1,8 +1,6 @@
 /// Reasons the chat cannot enter a listening state. Each case has its own fix,
 /// which the app presents.
 public enum EntryBlock: Equatable, Sendable {
-  /// The user denied microphone access. Only Settings can change it.
-  case microphoneDenied
   /// This locale has no speech model on this device.
   case speechUnavailable
   /// The speech model can be downloaded but is not installed yet. Benign: the
@@ -38,7 +36,6 @@ public func entryBlock(for state: VAState,
                        availability: Availability) -> EntryBlock?
 {
   guard state != .inactive else { return nil }
-  if !availability.microphone { return .microphoneDenied }
   switch availability.speech {
   case .installed: return nil
   case .notInstalled: return .speechModelNotInstalled
@@ -61,10 +58,10 @@ public func transition(
   guard let block = entryBlock(for: state, availability: availability) else {
     // Re-entering the current state changes nothing, so it plays no cue.
     if state == current {
-      return (Step(state: current, effects: []), nil)
+      return (Step(state: current), nil)
     }
     return (transition(to: state), nil)
   }
-  let sound: Sound = block == .speechModelNotInstalled ? .attention : .error
-  return (Step(state: current, effects: [.sound(sound)]), block)
+  let notice: VANoun = block == .speechModelNotInstalled ? .attentionNeeded : .requestFailed
+  return (Step(state: current, notifications: [notice]), block)
 }

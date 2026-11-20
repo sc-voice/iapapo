@@ -11,7 +11,11 @@ let appSettings: any AppSettings = UserDefaultsSettings()
 @MainActor
 let voiceSpeaker = Speaker(log: appLog, settings: appSettings)
 
-/// The voice agent the user talks to: the app's one `VAAgent`, with the speaker
-/// as its actor.
+/// The app's cue player, which plays the voice agent's notifications as sounds.
 @MainActor
-let voiceAgent = VAAgent(actors: [voiceSpeaker])
+let voiceCues = CuePlayer(log: appLog)
+
+/// The voice agent the user talks to: the app's one `VAAgent`, with the speaker
+/// and the cue player as its actors.
+@MainActor
+let voiceAgent = VAAgent(actors: [voiceSpeaker, voiceCues], settings: appSettings)

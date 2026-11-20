@@ -78,7 +78,7 @@ final class Speaker {
 /// Speaks the acknowledgement of a wake word. Other actions are ignored.
 extension Speaker: VAActor {
   func perform(_ event: VAEvent) async {
-    guard event.verb == .acknowledge, event.noun == .wakeup else { return }
+    guard event.action == .done, event.noun == .wakeup else { return }
     say("IaPapo hears you!")
   }
 }

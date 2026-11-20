@@ -371,7 +371,7 @@ Facts for picking this work back up. Each item points to a file or a run; check 
 
 - Six VACore test files load the hello clip from `media/iapapo/holdout/`. Their paths were updated during this session.
 - After that change, the audio-path failures are gone. The `missingWindowLength` failures remain in the `WakeMonitor` and `ProductionHop` tests. Re-exporting a model with `window_len`, or a fallback to the known 14287-sample window, would fix them.
-- `make test-core` still exits with an error.
+- `make test-core` passes: 91 tests, about 3 seconds, checked 2026-11-19.
 - `lab/wakeword/reference/resample/` does not exist, so the resampler test cannot run.
 
 **Rules and decisions**

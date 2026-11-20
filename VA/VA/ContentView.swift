@@ -13,6 +13,10 @@ import VACore
 struct ContentView: View {
   /// The app's one conversation state, owned by the global voice agent.
   private var chatState: VAState { voiceAgent.state }
+  /// Whether the mic and speech model can be used right now.
+  private var availability: Availability {
+    Availability(microphone: !microphone.isDenied, speech: speech.availability)
+  }
   @State private var log: EventLog
   @State private var cues: CuePlayer
   @State private var session: AudioSessionModel
@@ -42,9 +46,12 @@ struct ContentView: View {
     let microphone = Microphone(log: log, session: session)
     let recorder = ClipRecorder(log: log)
     let wakeScores = WakeScoreModel()
-    let cues = CuePlayer(log: log)
+    let cues = voiceCues
     let speaker = voiceSpeaker
     let agent = voiceAgent
+    wakeScores.onAboveAmbient = { agent.heard() }
+    agent.send(VAEvent(action: .set, noun: .micAvailable,
+                       value: microphone.isDenied ? "false" : "true"))
     let wake = WakeFeed(model: wakeScores, log: log, agent: agent, settings: appSettings)
     // Every captured buffer goes to the analyzer, the sample recorder and the
     // wake scorer. Each drops it when idle.
@@ -126,7 +133,6 @@ struct ContentView: View {
   /// Alert title for a refused entry.
   private func blockTitle(_ block: EntryBlock) -> String {
     switch block {
-    case .microphoneDenied: "Microphone denied"
     case .speechUnavailable: "Speech model unavailable"
     case .speechModelNotInstalled: "Speech model needed"
     }
@@ -135,8 +141,6 @@ struct ContentView: View {
   /// Alert message for a refused entry, with the fix for that blocker.
   private func blockMessage(_ block: EntryBlock) -> String {
     switch block {
-    case .microphoneDenied:
-      "\(appName) stays inactive without microphone access. Enable it in Settings → \(appName) → Microphone."
     case .speechUnavailable:
       "Speech recognition isn't available for \(speech.locale.identifier) on this device. Change the device language in Settings → General → Language & Region."
     case .speechModelNotInstalled:
@@ -154,13 +158,22 @@ struct ContentView: View {
     }
   }
 
-  /// Sends the enable or disable event for the voice agent, then enters the
-  /// matching state so the mic and cues follow.
+  /// Disables or enables the voice agent, then enters the matching state so the
+  /// mic and cues follow. Enabling is skipped when entry is refused, so the agent
+  /// stays inactive.
   private func toggleAgent() {
-    let active = chatState != .inactive
-    let event = VAEvent(verb: active ? .disable : .enable, noun: .voiceAgent)
-    Task { await voiceAgent.send(event) }
-    enter(active ? .inactive : .idle)
+    if chatState != .inactive {
+      voiceAgent.send(VAEvent(action: .disable, noun: .voiceAgent))
+      enter(.inactive)
+      return
+    }
+    // Without the mic the agent goes straight to listening, where typing works.
+    let target: VAState = microphone.isDenied ? .listening : .idle
+    let entry = VACore.transition(to: target, from: chatState, availability: availability)
+    if entry.block == nil {
+      voiceAgent.send(VAEvent(action: .enable, noun: .voiceAgent))
+    }
+    enter(target)
   }
 
   /// Enters `state` if the state machine allows it. The mic stops before the
@@ -168,10 +181,6 @@ struct ContentView: View {
   /// starts after, so the category change never happens while capture is
   /// running. Then performs the cues.
   private func enter(_ state: VAState) {
-    let availability = Availability(
-      microphone: !microphone.isDenied,
-      speech: speech.availability,
-    )
     let result = VACore.transition(
       to: state,
       from: chatState,
@@ -185,17 +194,25 @@ struct ContentView: View {
       } else {
         block = refused
       }
+      // A refused entry keeps the state and plays only its notice.
+      for notification in result.step.notifications {
+        voiceAgent.send(VAEvent(action: .notify, noun: notification))
+      }
+    } else {
+      voiceAgent.send(VAEvent(
+        action: .set,
+        noun: .voiceAgentState,
+        value: result.step.state.rawValue,
+      ))
     }
     let step = result.step
     log.info("state \(chatState) -> \(step.state)")
-    voiceAgent.setState(step.state)
     if step.state == .inactive {
       microphone.stop()
       speech.stop()
       wake.stop()
     }
     session.apply(step.state)
-    VACore.perform(step, with: cues)
     guard step.state != .inactive else { return }
     // The mic opens after the entry cue ends, so the recognizer doesn't hear
     // the cue's own speech.
@@ -205,7 +222,8 @@ struct ContentView: View {
       guard chatState == step.state else { return }
       microphone.start()
       speech.start()
-      wake.start()
+      // The wake word needs the mic, so it stays off when the mic is denied.
+      if !microphone.isDenied { wake.start() }
     }
   }
 
@@ -216,6 +234,7 @@ struct ContentView: View {
           state: chatState,
           microphone: microphone,
           speech: speech,
+          wakeScores: wakeScores,
           onMicTap: toggleAgent,
           onSelect: select,
         )
@@ -239,6 +258,10 @@ struct ContentView: View {
       Tab("Settings", systemImage: "gear") {
         SettingsView()
       }
+    }
+    .onChange(of: microphone.isDenied) { _, denied in
+      voiceAgent.send(VAEvent(action: .set, noun: .micAvailable,
+                              value: denied ? "false" : "true"))
     }
     .onReceive(NotificationCenter.default
       .publisher(for: AVAudioSession.routeChangeNotification))
@@ -309,22 +332,41 @@ struct HomeView: View {
   let state: VAState
   let microphone: Microphone
   let speech: SpeechModel
+  let wakeScores: WakeScoreModel
   let onMicTap: () -> Void
   let onSelect: (VAState) -> Void
   /// Whether the arrow and icon bar are visible.
   @State private var barShown = true
-  /// Pending fade-out, cancelled when the user engages again.
-  @State private var fadeTask: Task<Void, Never>?
+  /// Whether the pointer is over the mic button while the agent is inactive. The
+  /// bar then shows the one state the user can enter: idle.
+  @State private var barHovered = false
+  /// The 10-second countdown that hides the icon bar. Any show restarts it.
+  @State private var iconbarCountdown: Task<Void, Never>?
+  /// The state a bar tap asked for. Its state change does not show the bar again.
+  @State private var tappedTarget: VAState?
 
-  /// Shows the icon bar and restarts the 10-second fade-out timer.
+  /// How long the icon bar stays visible after the last show, in seconds.
+  static let iconbarTimeout = Duration.seconds(2)
+
+  /// Shows the icon bar and restarts the countdown. When the countdown ends, the
+  /// bar hides.
   private func showBar() {
-    fadeTask?.cancel()
+    iconbarCountdown?.cancel()
     withAnimation(.easeIn(duration: 0.3)) { barShown = true }
-    fadeTask = Task {
-      try? await Task.sleep(for: .seconds(10))
+    iconbarCountdown = Task {
+      try? await Task.sleep(for: Self.iconbarTimeout)
       guard !Task.isCancelled else { return }
       withAnimation(.easeOut(duration: 0.5)) { barShown = false }
+      barHovered = false
     }
+  }
+
+  /// Hides the icon bar at once and cancels the countdown. Used when a bar button
+  /// is tapped.
+  private func hideBar() {
+    iconbarCountdown?.cancel()
+    withAnimation(.easeOut(duration: 0.5)) { barShown = false }
+    barHovered = false
   }
 
   var body: some View {
@@ -342,30 +384,54 @@ struct HomeView: View {
             || speech.modelStatus == "downloading",
           action: {
             showBar()
-            onMicTap()
+            if state == .inactive { onMicTap() }
           },
+          ringOpen: wakeScores.windowAboveAmbient(by: appSettings.ambientWakeDb),
         )
+        // Hovering the mic button always shows the icon bar.
+        .onHover { hovering in
+          guard hovering else { return }
+          if state == .inactive { barHovered = true }
+          showBar()
+        }
         // The gap sits inside the bar, so a hidden bar adds no width and the
         // button stays centered.
         // Faded-out bars leave the layout, so the button recenters.
-        if state != .inactive && barShown {
+        if barShown && (state != .inactive || barHovered) {
           HStack(spacing: 24) {
             Image(systemName: "arrow.right")
               .font(.system(size: 36))
-            AgentView(state: state, onSelect: { target in
-              showBar()
+            AgentView(state: state, micAvailable: !microphone.isDenied, onSelect: { target in
+              tappedTarget = target
+              hideBar()
               onSelect(target)
             })
           }
           .padding(.leading, 24)
           .transition(.opacity)
+          // While the pointer is over the bar, the countdown is paused. It restarts
+          // at the full timeout when the pointer leaves.
+          .onHover { hovering in
+            if hovering {
+              iconbarCountdown?.cancel()
+            } else {
+              showBar()
+            }
+          }
         }
       }
       .animation(.easeInOut(duration: 0.3), value: state != .inactive)
     }
     .padding()
     .onAppear { showBar() }
-    .onChange(of: state) { _, _ in showBar() }
+    .onChange(of: state) { _, new in
+      // A bar tap already hid the bar; its state change must not show it again.
+      if new == tappedTarget {
+        tappedTarget = nil
+        return
+      }
+      showBar()
+    }
   }
 }
 
@@ -386,13 +452,18 @@ struct MicButton: View {
   let waiting: Bool
   /// Called when the user taps the button.
   let action: () -> Void
+  /// Whether the window level is above the ambient floor by the gate margin. Only
+  /// idle uses it: the ring is green when true and gray otherwise.
+  let ringOpen: Bool
 
-  /// The symbol at `tick`: a red slash when denied, the mic when inactive, and
-  /// the current state's symbol when active.
+  /// The symbol at `tick`: the moon when inactive, a red ladybug slash when idle
+  /// without the mic, a keyboard when listening without the mic (typing replaces
+  /// speech), and the current state's symbol otherwise.
   /// - Parameter tick: the whole second, passed to `AgentView.symbol`.
   private func icon(tick: Int) -> String {
-    if denied { return "mic.slash" }
-    if state == .inactive { return "mic" }
+    if state == .inactive { return "moon.zzz" }
+    if denied && state == .idle { return "ladybug.slash" }
+    if denied && state == .listening { return "keyboard" }
     return AgentView.symbol(for: state, tick: tick)
   }
 
@@ -401,27 +472,32 @@ struct MicButton: View {
       TimelineView(.animation) { context in
         let seconds = context.date.timeIntervalSinceReferenceDate
         let tick = Int(seconds)
-        LevelRing(
-          value: micOn
-            ? Double((level - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
-            : 0,
-          fill: .green,
-        )
-        .overlay {
+        ZStack {
+          // Inactive shows no ring.
+          if state != .inactive {
+            LevelRing(
+              // Idle shows the level only while the window rule holds.
+              value: micOn && (state != .idle || ringOpen)
+                ? Double((level - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
+                : 0,
+              fill: state == .idle && !ringOpen ? .gray : .green,
+            )
+          }
           if waiting && !denied {
             ProgressView()
           } else {
             Image(systemName: icon(tick: tick))
               .font(.system(size: 36))
               .foregroundStyle(
-                denied ? .red : state == .inactive ? .primary : AgentView.idleColor(at: seconds)
+                denied && state == .idle ? .red
+                  : state == .inactive || denied ? .primary : AgentView.idleColor(at: seconds)
               )
           }
         }
       }
     }
     .buttonStyle(.plain)
-    .disabled(denied || waiting)
+    .disabled(waiting)
   }
 }
 
@@ -429,20 +505,31 @@ struct MicButton: View {
 /// that state. Paired symbols flip every second with a fade.
 struct AgentView: View {
   let state: VAState
+  /// Whether the mic can be used. When it cannot, listening is typed, so its
+  /// icon is a keyboard.
+  let micAvailable: Bool
   /// Called with the state the user taps.
   let onSelect: (VAState) -> Void
 
   /// The states reachable from `state` in one step, per the state diagram in
   /// the design doc. The current state is never included.
   /// - Parameter state: the current state.
-  static func permittedNext(from state: VAState) -> [VAState] {
+  /// Without the mic, idle is never offered, and inactive offers listening, since
+  /// the user types.
+  /// - Parameters:
+  ///   - state: the current state.
+  ///   - micAvailable: whether the mic can be used.
+  static func permittedNext(from state: VAState, micAvailable: Bool) -> [VAState] {
+    let table: [VAState]
     switch state {
-    case .inactive: [.idle]
-    case .idle: [.listening, .inactive]
-    case .listening: [.speaking, .idle, .inactive]
-    case .thinking: [.speaking, .idle]
-    case .speaking: [.listening, .idle]
+    case .inactive: table = [.listening]
+    case .idle: table = [.listening, .inactive]
+    case .listening: table = [.speaking, .idle, .inactive]
+    case .thinking: table = [.speaking, .idle]
+    case .speaking: table = [.listening, .idle]
     }
+    if micAvailable { return table }
+    return table.filter { $0 != .idle }
   }
 
   var body: some View {
@@ -453,11 +540,11 @@ struct AgentView: View {
       let spin = Angle.degrees(seconds.truncatingRemainder(dividingBy: 4) / 4 * 360)
       let idleColor = AgentView.idleColor(at: seconds)
       HStack(spacing: 24) {
-        ForEach(Self.permittedNext(from: state), id: \.self) { icon in
+        ForEach(Self.permittedNext(from: state, micAvailable: micAvailable), id: \.self) { icon in
           Button {
             onSelect(icon)
           } label: {
-            Image(systemName: Self.symbol(for: icon, tick: tick))
+            Image(systemName: Self.barSymbol(for: icon, tick: tick, micAvailable: micAvailable))
               .font(.system(size: 36))
               .contentTransition(.opacity)
               .rotationEffect(icon == .thinking ? spin : .zero)
@@ -486,6 +573,21 @@ struct AgentView: View {
     return Color(.systemBackground).mix(with: .green, by: breathe)
   }
 
+  /// The symbol for one icon-bar button. Without the mic, inactive shows a moon
+  /// and listening shows a keyboard, since the user types.
+  /// - Parameters:
+  ///   - state: the state the button enters.
+  ///   - tick: the whole second, passed to `symbol(for:tick:)`.
+  ///   - micAvailable: whether the mic can be used.
+  static func barSymbol(for state: VAState, tick: Int, micAvailable: Bool) -> String {
+    if micAvailable { return symbol(for: state, tick: tick) }
+    switch state {
+    case .inactive: return "moon.zzz"
+    case .listening: return "keyboard"
+    default: return symbol(for: state, tick: tick)
+    }
+  }
+
   /// The SF Symbol for `state`. Paired symbols alternate on each tick.
   /// - Parameters:
   ///   - state: the state to draw.
@@ -493,7 +595,7 @@ struct AgentView: View {
   static func symbol(for state: VAState, tick: Int) -> String {
     let filled = (tick / 2).isMultiple(of: 2)
     switch state {
-    case .inactive: return "mic.slash"
+    case .inactive: return "moon.zzz"
     case .idle: return "apple.meditate"
     case .listening: return filled ? "ear.fill" : "ear"
     case .thinking: return filled ? "puzzlepiece.extension.fill" : "puzzlepiece.extension"

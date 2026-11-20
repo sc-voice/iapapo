@@ -25,7 +25,7 @@ private struct AlwaysRule: WakeEventRule {
 @Test func fourStridesFireOnce() {
   var rule = StrideRunRule(runLength: 4, cooldown: 2)
   let fired = (0 ..< 4).compactMap { rule.event(for: score(true, at: Double($0) * 0.05)) }
-  #expect(fired.count == 1 && fired[0].matches(verb: .sensed, noun: .wakeup))
+  #expect(fired.count == 1 && fired[0].matches(action: .sensed, noun: .wakeup))
 }
 
 @Test func threeStridesDoNotFire() {
@@ -64,7 +64,7 @@ private struct AlwaysRule: WakeEventRule {
 @Test func longRunFiresOnce() {
   var rule = StrideRunRule(runLength: 4, cooldown: 2)
   let fired = (0 ..< 10).compactMap { rule.event(for: score(true, at: Double($0) * 0.05)) }
-  #expect(fired.count == 1 && fired[0].matches(verb: .sensed, noun: .wakeup))
+  #expect(fired.count == 1 && fired[0].matches(action: .sensed, noun: .wakeup))
 }
 
 @Test func monitorStreamsScoresAndRuleEvents() async throws {
@@ -89,5 +89,5 @@ private struct AlwaysRule: WakeEventRule {
   #expect(!returned.isEmpty)
   #expect(streamedScores == returned)
   #expect(streamedEvents.count == returned.count)
-  #expect(streamedEvents.allSatisfy { $0.matches(verb: .sensed, noun: .wakeup) })
+  #expect(streamedEvents.allSatisfy { $0.matches(action: .sensed, noun: .wakeup) })
 }

@@ -31,6 +31,14 @@ final class WakeScoreModel {
   /// floor, from the latest score. False until the first hop.
   private(set) var gateOpen = false
 
+  /// Whether the latest window level is at least `marginDb` above the latest
+  /// ambient floor. False until both levels are known, so the ring starts gray.
+  /// - Parameter marginDb: the gate margin in dB, from the app settings.
+  func windowAboveAmbient(by marginDb: Float) -> Bool {
+    guard let windowDb, let ambientDb else { return false }
+    return windowDb - ambientDb >= marginDb
+  }
+
   /// The wake monitor's scoring period, in milliseconds. One event per stride.
   static let strideMs = WakeMonitor.productionStrideMs
   /// Probability at or above which a stride counts as a wake word.
@@ -67,6 +75,9 @@ final class WakeScoreModel {
     }
   }
 
+  /// Called for each score whose window level clears the wake margin.
+  var onAboveAmbient: (() -> Void)?
+
   /// Applies one score from `WakeMonitor`.
   /// - Parameter score: the window's probability, levels and gate state.
   func receive(_ score: WakeScore) {
@@ -75,6 +86,7 @@ final class WakeScoreModel {
     ambientDb = score.ambientDb
     windowDb = score.windowDb
     gateOpen = score.gateOpen
+    if windowAboveAmbient(by: appSettings.ambientWakeDb) { onAboveAmbient?() }
     micHistory = Array(([score.micDb] + micHistory).prefix(Self.historyCount))
     scoreHistory = Array(([raw] + scoreHistory).prefix(Self.historyCount))
     wakeHistory = Array(([score.wakeWord] + wakeHistory).prefix(Self.historyCount))
@@ -159,7 +171,11 @@ final class WakeFeed {
     model.consume(monitor.scores)
     let agent = agent
     let events = monitor.events
-    Task { await agent.run(events) }
+    Task {
+      for await event in events {
+        agent.send(event)
+      }
+    }
     let model = model
     let log = log
     task = Task { [monitor] in

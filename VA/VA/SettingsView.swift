@@ -22,7 +22,16 @@ final class VoicePreviewer {
 struct SettingsView: View {
   @AppStorage(UserDefaultsSettings.voiceIdentifierKey) private var voiceID = ""
   @AppStorage(UserDefaultsSettings.ambientWakeDbKey) private var ambientWakeDb = UserDefaultsSettings.defaultAmbientWakeDb
+  @AppStorage(UserDefaultsSettings.listenTimeoutKey) private var listenTimeout = UserDefaultsSettings.defaultListenTimeout
   @State private var previewer = VoicePreviewer()
+
+  /// The listen timeout as minutes, for the slider. Stored in seconds.
+  private var listenMinutes: Binding<Double> {
+    Binding(
+      get: { listenTimeout / 60 },
+      set: { listenTimeout = $0 * 60 }
+    )
+  }
 
   /// Voices for the system locale's language, grouped by quality (highest first) and sorted by name.
   private var groups: [(label: String, voices: [AVSpeechSynthesisVoice])] {
@@ -64,6 +73,18 @@ struct SettingsView: View {
         } footer: {
           Text("The window level must rise this far above the ambient floor to open the wake gate.")
         }
+        Section {
+          HStack {
+            Slider(value: listenMinutes, in: 1 ... 60, step: 1)
+            Text("\(Int(listenTimeout / 60)) min")
+              .monospacedDigit()
+              .frame(width: 60, alignment: .trailing)
+          }
+        } header: {
+          Text("Listen timeout (minutes)")
+        } footer: {
+          Text("Listening returns to idle after this long without a signal above the wake margin.")
+        }
       }
       .navigationTitle("Settings")
       .onChange(of: voiceID) { _, identifier in
@@ -73,6 +94,8 @@ struct SettingsView: View {
         }
       }
     }
+    // Fixed to the narrowest iPhone screen, 375 points.
+    .frame(width: 375)
   }
 
   /// Display label for a voice quality tier.
