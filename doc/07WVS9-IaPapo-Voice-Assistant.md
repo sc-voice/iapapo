@@ -147,7 +147,7 @@ State transitions tirgger e.g., `VAEvents(verb:.notifyu, noun:("state-idle"))` t
 - Duplex: in hal-duplex, listening/speaking alternate strictly in turn. With full duplex, the microphone is often live even when the speaker is active. The mic is live so that it can trigger a state change. Standard full-duplex relies on arbtitrary "barge-in". Sync-duplex restricts the barge-in to key phrases (e.g., wakeWord, idleWord)
 - Foreground: for simplicity iaPapo Voice Assistant is only interactive when the app is in the foreground. When the app is no longer in the foreground, the ChatState should be INACTIVE. Background VA is out of scope for now. 
 - ChatStates (tactical, not final): INACTIVE, IDLE, LISTENING, THINKING, SPEAKING.
-- Development: for experiments we have M5 Pro 64GB (Dinna.local:7235) as main local inference LLM via oMLX; M4 Pro 64GB for desktop premium local voice assistant and decision model testing; iPhone 17  iOS 27 and iPad Pro M4 iOS 27 for mobile voice assistant testing.
+- Development: for experiments we have M5 Pro 64GB running oMLX as main local inference LLM; M4 Pro 64GB for desktop premium local voice assistant and decision model testing; iPhone 17  iOS 27 and iPad Pro M4 iOS 27 for mobile voice assistant testing.
 - InputState: the state of the microphone: ON, OFF.
 - OutputState: the state of the speech: play time-remaining in seconds
 - VAQ: the quality of a voice agent (VAQ) is measured by inverse of the number of words taken for synchronizing the understanding of chat participants for a given benchmark topic.

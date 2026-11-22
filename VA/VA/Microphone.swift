@@ -42,9 +42,10 @@ final class Microphone {
   func start() {
     guard !isOn, !wanted else { return }
     wanted = true
-    AVAudioApplication.requestRecordPermission { granted in
-      Task { @MainActor [weak self] in
-        self?.open(granted: granted)
+    AVAudioApplication.requestRecordPermission { [weak self] granted in
+      guard let self else { return }
+      Task { @MainActor in
+        self.open(granted: granted)
       }
     }
   }

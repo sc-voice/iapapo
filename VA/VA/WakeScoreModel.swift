@@ -176,7 +176,6 @@ final class WakeFeed {
         agent.send(event)
       }
     }
-    let model = model
     let log = log
     task = Task { [monitor] in
       var monitor = monitor

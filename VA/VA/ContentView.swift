@@ -230,6 +230,7 @@ struct ContentView: View {
   var body: some View {
     TabView {
       Tab("Home", systemImage: "house") {
+        BackgroundWrapper {
         HomeView(
           state: chatState,
           microphone: microphone,
@@ -238,8 +239,10 @@ struct ContentView: View {
           onMicTap: toggleAgent,
           onSelect: select,
         )
+        }
       }
       Tab("Developer", systemImage: "hammer") {
+        BackgroundWrapper {
         DeveloperView(
           chatState: chatState,
           microphone: microphone,
@@ -254,9 +257,12 @@ struct ContentView: View {
           onBeginClip: beginClip,
           onEndClip: endClip,
         )
+        }
       }
       Tab("Settings", systemImage: "gear") {
-        SettingsView()
+        BackgroundWrapper(blur: 10) {
+          SettingsView()
+        }
       }
     }
     .onChange(of: microphone.isDenied) { _, denied in
@@ -371,6 +377,12 @@ struct HomeView: View {
 
   var body: some View {
     VStack(spacing: 32) {
+      Image("stochastic-parrot")
+        .resizable()
+        .scaledToFit()
+        .frame(width: 100, height: 100)
+        .padding(.bottom, -20)
+        .accessibilityHidden(true)
       Text(VAConfig().agentName)
         .font(.system(size: 72, weight: .bold))
         .minimumScaleFactor(0.5)
