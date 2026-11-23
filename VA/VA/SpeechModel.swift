@@ -85,6 +85,8 @@ final class SpeechModel {
 
   /// Finalized text from the transcriber. Only final results are appended here.
   private(set) var committed = ""
+  /// Finalized text not yet taken by the prompt. `takePending()` clears it.
+  private(set) var pending = ""
   /// Interim text for the phrase in progress. Replaced by each volatile result.
   private(set) var volatile = ""
   /// What the Prompt section shows: committed text followed by the volatile
@@ -134,6 +136,7 @@ final class SpeechModel {
     inputContinuation = continuation
     targetFormat = format
     committed = ""
+    pending = ""
     volatile = ""
     resultsTask = Task { [weak self] in
       do {
@@ -141,6 +144,7 @@ final class SpeechModel {
           let text = String(result.text.characters)
           if result.isFinal {
             self?.committed += text
+            self?.pending += text
             self?.volatile = ""
           } else {
             self?.volatile = text
@@ -172,19 +176,63 @@ final class SpeechModel {
     resultsTask = nil
   }
 
+  /// Copies channel 0 of a float buffer into a new mono float buffer at the same
+  /// sample rate. Avoids the converter's stereo downmix, which produced silence.
+  static func channelZero(_ source: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    guard let input = source.floatChannelData?[0],
+          let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: source.format.sampleRate,
+            channels: 1,
+            interleaved: false,
+          ),
+          let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: source.frameLength),
+          let output = mono.floatChannelData?[0] else { return nil }
+    output.update(from: input, count: Int(source.frameLength))
+    mono.frameLength = source.frameLength
+    return mono
+  }
+
+  /// Copies mono float samples into a 16-bit buffer of `format`, or nil when
+  /// `format` has no 16-bit channel data.
+  static func quantize(_ source: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+    guard let input = source.floatChannelData?[0],
+          let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: source.frameLength),
+          let samples = output.int16ChannelData?[0] else { return nil }
+    for index in 0 ..< Int(source.frameLength) {
+      let scaled = (Double(input[index]) * 32767).rounded()
+      samples[index] = Int16(max(-32768, min(32767, scaled)))
+    }
+    output.frameLength = source.frameLength
+    return output
+  }
+
+  /// Returns the pending finalized text and clears it, so the prompt takes each
+  /// phrase once.
+  func takePending() -> String {
+    let text = pending
+    pending = ""
+    return text
+  }
+
   /// Passes one captured buffer to the analyzer, converted to the format it
-  /// expects.
+  /// expects: channel 0 only, resampled to float, then quantized to 16-bit.
   func feed(_ buffer: AVAudioPCMBuffer) {
     guard let continuation = inputContinuation,
           let format = targetFormat else { return }
+    let floatFormat = AVAudioFormat(
+      commonFormat: .pcmFormatFloat32,
+      sampleRate: format.sampleRate,
+      channels: format.channelCount,
+      interleaved: false,
+    )
+    guard let floatFormat, let mono = Self.channelZero(buffer) else { return }
     if converter == nil {
-      converter = AVAudioConverter(from: buffer.format, to: format)
+      converter = AVAudioConverter(from: mono.format, to: floatFormat)
     }
-    guard let converter, let converted = convert(
-      buffer,
-      with: converter,
-      to: format,
-    ) else { return }
+    guard let converter,
+          let resampled = convert(mono, with: converter, to: floatFormat),
+          let converted = Self.quantize(resampled, to: format) else { return }
     continuation.yield(AnalyzerInput(buffer: converted))
   }
 

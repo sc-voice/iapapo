@@ -214,6 +214,13 @@ struct ContentView: View {
     }
     session.apply(step.state)
     guard step.state != .inactive else { return }
+    // Speech recognition runs only while listening. Other states stop it now.
+    if step.state == .listening {
+      log.info("speech: requested for listening")
+    } else {
+      log.info("speech: stopped for \(step.state)")
+      speech.stop()
+    }
     // The mic opens after the entry cue ends, so the recognizer doesn't hear
     // the cue's own speech.
     Task {
@@ -221,7 +228,7 @@ struct ContentView: View {
       // Skip if the chat has moved on while the cue played.
       guard chatState == step.state else { return }
       microphone.start()
-      speech.start()
+      if step.state == .listening { speech.start() }
       // The wake word needs the mic, so it stays off when the mic is denied.
       if !microphone.isDenied { wake.start() }
     }
@@ -350,6 +357,15 @@ struct HomeView: View {
   @State private var iconbarCountdown: Task<Void, Never>?
   /// The state a bar tap asked for. Its state change does not show the bar again.
   @State private var tappedTarget: VAState?
+  /// The prompt the user types. Owned by the user.
+  @State private var promptEntry = ""
+  /// The prompt's insertion point, moved to the end when speech is appended.
+  @State private var promptSelection: TextSelection?
+  /// The wait before pending speech moves into `promptEntry`. Restarted by each
+  /// user edit and each new commit.
+  @State private var moveTask: Task<Void, Never>?
+  /// How long the prompt stays unchanged before pending speech moves in.
+  static let promptIdleTime = Duration.milliseconds(500)
 
   /// How long the icon bar stays visible after the last show, in seconds.
   static let iconbarTimeout = Duration.seconds(2)
@@ -367,6 +383,22 @@ struct HomeView: View {
     }
   }
 
+  /// Restarts the wait, then moves pending speech into `promptEntry` if it is
+  /// still pending.
+  private func scheduleMove() {
+    moveTask?.cancel()
+    moveTask = Task {
+      try? await Task.sleep(for: Self.promptIdleTime)
+      guard !Task.isCancelled else { return }
+      let text = speech.takePending()
+      guard !text.isEmpty else { return }
+      let joined = promptEntry.isEmpty ? text : promptEntry + "\n" + text
+      promptEntry = joined
+      // Move the insertion point to the new end, so the field scrolls to it.
+      promptSelection = TextSelection(insertionPoint: joined.endIndex)
+    }
+  }
+
   /// Hides the icon bar at once and cancels the countdown. Used when a bar button
   /// is tapped.
   private func hideBar() {
@@ -377,15 +409,18 @@ struct HomeView: View {
 
   var body: some View {
     VStack(spacing: 32) {
-      Image("stochastic-parrot")
-        .resizable()
-        .scaledToFit()
-        .frame(width: 100, height: 100)
-        .padding(.bottom, -20)
-        .accessibilityHidden(true)
-      Text(VAConfig().agentName)
-        .font(.system(size: 72, weight: .bold))
-        .minimumScaleFactor(0.5)
+      // The parrot and title show only while the agent is inactive.
+      if state == .inactive {
+        Image("stochastic-parrot")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 100, height: 100)
+          .padding(.bottom, -20)
+          .accessibilityHidden(true)
+        Text(VAConfig().agentName)
+          .font(.system(size: 72, weight: .bold))
+          .minimumScaleFactor(0.5)
+      }
       HStack(spacing: 0) {
         MicButton(
           state: state,
@@ -433,9 +468,30 @@ struct HomeView: View {
         }
       }
       .animation(.easeInOut(duration: 0.3), value: state != .inactive)
+      // The prompt area is shown only while the agent is active.
+      if state != .inactive {
+        VStack(spacing: 8) {
+          // User area: the prompt, typed or moved in from speech.
+          TextField("Prompt", text: $promptEntry, selection: $promptSelection, axis: .vertical)
+            .lineLimit(3 ... 15)
+            .textFieldStyle(.roundedBorder)
+            .font(.title3)
+          // Agent area: finalized speech, waiting to move into the prompt.
+          Text(speech.pending)
+            .font(.title3)
+            .foregroundStyle(.blue)
+          // Apple area: the phrase still being recognized.
+          Text(speech.volatile)
+            .font(.title3)
+            .foregroundStyle(Color.gray.opacity(0.5))
+        }
+        .frame(maxWidth: 480)
+      }
     }
     .padding()
     .onAppear { showBar() }
+    .onChange(of: promptEntry) { _, _ in scheduleMove() }
+    .onChange(of: speech.pending) { _, _ in scheduleMove() }
     .onChange(of: state) { _, new in
       // A bar tap already hid the bar; its state change must not show it again.
       if new == tappedTarget {
@@ -609,9 +665,9 @@ struct AgentView: View {
     switch state {
     case .inactive: return "moon.zzz"
     case .idle: return "apple.meditate"
-    case .listening: return filled ? "ear.fill" : "ear"
+    case .listening: return "ear"
     case .thinking: return filled ? "puzzlepiece.extension.fill" : "puzzlepiece.extension"
-    case .speaking: return filled ? "speaker.wave.2.bubble.fill" : "speaker.wave.2.bubble"
+    case .speaking: return filled ? "character.bubble" : "bubble"
     }
   }
 }

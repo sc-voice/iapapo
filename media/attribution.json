@@ -16,5 +16,23 @@
     "license": "CC BY-NC 4.0",
     "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
     "changes": "Cut to 5 s (15-20 s of the source) and converted to mono 16 kHz for training noise."
+  },
+  {
+    "file": "414147__felixblume__parrots.m4a",
+    "title": "Parrots singing in the forest",
+    "creator": "felix.blume",
+    "source": "https://freesound.org/s/414147/",
+    "license": "CC0 1.0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/",
+    "changes": "Converted WAV to AAC m4a. Cut to the first 25 s and faded the last 5 s to silence."
+  },
+  {
+    "file": "732660__inchadney__tawny.m4a",
+    "title": "tawny-owl",
+    "creator": "inchadney",
+    "source": "https://freesound.org/people/inchadney/sounds/732660/",
+    "license": "Attribution NonCommercial 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
+    "changes": "Cut to the first 700 ms of 732660__inchadney__tawny-owl.wav and encoded to AAC m4a."
   }
 ]

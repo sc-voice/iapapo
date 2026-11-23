@@ -48,9 +48,9 @@ final class Speaker {
       }
       return a.name < b.name
     }
-    for voice in voices {
-      print("[VA voice] \(voice.name) \(voice.identifier) \(voice.language) quality \(voice.quality.rawValue)")
-    }
+    //for voice in voices {
+      //print("[VA voice] \(voice.name) \(voice.identifier) \(voice.language) quality \(voice.quality.rawValue)")
+    //}
   }
 
   /// Every installed English voice, sorted by name, for the voice picklist.
