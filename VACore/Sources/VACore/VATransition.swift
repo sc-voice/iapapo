@@ -58,37 +58,55 @@ private func entryNotification(for state: VAState) -> VANoun? {
   }
 }
 
-/// Applies one event to the state machine, following the transition table in
-/// the article.
+/// One row of the transition table: in `from`, an event with `action` and `noun`
+/// enters `to`, with the `notify` and `before` lists `transition(to:)` takes.
+struct TransitionRow: Sendable {
+  let from: VAState
+  let action: VAAction
+  let noun: VANoun
+  let to: VAState
+  var notify: [VANoun]?
+  var before: [Effect] = []
+}
+
+/// The transition table, following the article. Row order within a state is the
+/// order `reachable(from:)` returns its targets.
+private let transitionTable: [TransitionRow] = [
+  TransitionRow(from: .inactive, action: .enable, noun: .voiceAgent, to: .listening, notify: [.agentEnabled]),
+  TransitionRow(from: .idle, action: .sensed, noun: .wakeup, to: .listening, notify: [.wakeWordHeard]),
+  TransitionRow(from: .idle, action: .disable, noun: .voiceAgent, to: .inactive),
+  TransitionRow(from: .listening, action: .sensed, noun: .invalidPrompt, to: .speaking, notify: [.clarifyRequested, .speakingStarted]),
+  TransitionRow(from: .listening, action: .sensed, noun: .quickPrompt, to: .thinking),
+  TransitionRow(from: .listening, action: .sensed, noun: .validPrompt, to: .thinking),
+  TransitionRow(from: .listening, action: .sensed, noun: .listenTimeout, to: .idle),
+  TransitionRow(from: .listening, action: .sensed, noun: .idleWord, to: .idle),
+  TransitionRow(from: .listening, action: .disable, noun: .voiceAgent, to: .inactive),
+  TransitionRow(from: .thinking, action: .sensed, noun: .llmResponseReady, to: .speaking),
+  TransitionRow(from: .thinking, action: .sensed, noun: .llmFailed, to: .idle, notify: [.requestFailed], before: [.cancelThink]),
+  TransitionRow(from: .thinking, action: .sensed, noun: .idleWord, to: .idle, before: [.cancelThink]),
+  TransitionRow(from: .speaking, action: .sensed, noun: .audioFinished, to: .listening),
+  TransitionRow(from: .speaking, action: .sensed, noun: .idleWord, to: .idle, before: [.cancelSpeech]),
+  TransitionRow(from: .speaking, action: .sensed, noun: .wakeup, to: .listening, notify: [.wakeWordHeard], before: [.cancelSpeech]),
+]
+
+/// Applies one event to the state machine.
 /// Events with no row for the current state leave the state unchanged and
 /// produce no effects or notifications.
 public func transition(from state: VAState, on event: VAEvent) -> Step {
-  switch (state, event.action, event.noun) {
-  case (.inactive, .enable, .voiceAgent):
-    transition(to: .idle, notify: [.agentEnabled])
-  case (.idle, .sensed, .wakeup):
-    transition(to: .listening, notify: [.wakeWordHeard])
-  case (.idle, .disable, .voiceAgent), (.listening, .disable, .voiceAgent):
-    transition(to: .inactive)
-  case (.listening, .sensed, .quickPrompt), (.listening, .sensed, .validPrompt):
-    transition(to: .thinking)
-  case (.listening, .sensed, .invalidPrompt):
-    transition(to: .speaking, notify: [.clarifyRequested, .speakingStarted])
-  case (.listening, .sensed, .listenTimeout), (.listening, .sensed, .idleWord):
-    transition(to: .idle)
-  case (.thinking, .sensed, .llmResponseReady):
-    transition(to: .speaking)
-  case (.thinking, .sensed, .llmFailed):
-    transition(to: .idle, notify: [.requestFailed], before: [.cancelThink])
-  case (.thinking, .sensed, .idleWord):
-    transition(to: .idle, before: [.cancelThink])
-  case (.speaking, .sensed, .idleWord):
-    transition(to: .idle, before: [.cancelSpeech])
-  case (.speaking, .sensed, .audioFinished):
-    transition(to: .listening)
-  case (.speaking, .sensed, .wakeup):
-    transition(to: .listening, notify: [.wakeWordHeard], before: [.cancelSpeech])
-  default:
-    Step(state: state)
+  guard let row = transitionTable.first(where: {
+    $0.from == state && $0.action == event.action && $0.noun == event.noun
+  }) else {
+    return Step(state: state)
   }
+  return transition(to: row.to, notify: row.notify, before: row.before)
+}
+
+/// The states one event can reach from `state`, in table order, without repeats.
+/// `state` itself is never included.
+public func reachable(from state: VAState) -> [VAState] {
+  var targets: [VAState] = []
+  for row in transitionTable where row.from == state && row.to != state {
+    if !targets.contains(row.to) { targets.append(row.to) }
+  }
+  return targets
 }

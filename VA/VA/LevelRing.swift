@@ -20,10 +20,10 @@ struct LevelRing: View {
     let fraction = min(max(value, 0), 1)
     ZStack {
       Circle()
-        .stroke(track, lineWidth: 10)
+        .stroke(track, lineWidth: 3)
       Circle()
         .trim(from: 0, to: fraction)
-        .stroke(fill, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+        .stroke(fill, style: StrokeStyle(lineWidth: 3, lineCap: .round))
         .rotationEffect(.degrees(-90))
     }
     .frame(width: Self.diameter, height: Self.diameter)

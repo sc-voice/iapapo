@@ -79,6 +79,6 @@ final class Speaker {
 extension Speaker: VAActor {
   func perform(_ event: VAEvent) async {
     guard event.action == .done, event.noun == .wakeup else { return }
-    say("IaPapo hears you!")
+    say("I hears you!")
   }
 }

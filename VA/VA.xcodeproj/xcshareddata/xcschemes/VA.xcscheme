@@ -41,17 +41,6 @@
                ReferencedContainer = "container:VA.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F29F3FC93093AFC60097F8D4"
-               BuildableName = "VAUITests.xctest"
-               BlueprintName = "VAUITests"
-               ReferencedContainer = "container:VA.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

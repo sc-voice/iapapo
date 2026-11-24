@@ -20,6 +20,8 @@ private func nouns(_ events: [VAEvent]) -> [VANoun] {
   let agent = VAAgent(actors: [])
   #expect(nouns(agent.react(to: VAEvent(action: .enable, noun: .voiceAgent)))
     == [.agentEnabled])
+  // The listen timeout reaches idle by set, so the test does the same.
+  _ = agent.react(to: VAEvent(action: .set, noun: .voiceAgentState, value: VAState.idle.rawValue))
   #expect(agent.state == .idle)
   #expect(nouns(agent.react(to: .sensed(.wakeup))) == [.wakeWordHeard, .wakeup])
   #expect(agent.state == .listening)
@@ -85,14 +87,16 @@ private func nouns(_ events: [VAEvent]) -> [VANoun] {
   let second = RecordingActor()
   let agent = VAAgent(actors: [first, second])
   agent.send(VAEvent(action: .enable, noun: .voiceAgent))
+  // The listen timeout reaches idle by set, so the test does the same.
+  agent.send(VAEvent(action: .set, noun: .voiceAgentState, value: VAState.idle.rawValue))
   agent.send(.sensed(.wakeup))
-  // Enable gives one notification; the wake word gives a notification and an acknowledgement.
-  while await first.performed.count < 3 {
+  // Enable gives one notification, idle gives one, and the wake word gives a notification and an acknowledgement.
+  while await first.performed.count < 4 {
     await Task.yield()
   }
   let firstNouns = await nouns(first.performed)
   let secondNouns = await nouns(second.performed)
-  #expect(firstNouns == [.agentEnabled, .wakeWordHeard, .wakeup])
-  #expect(secondNouns == [.agentEnabled, .wakeWordHeard, .wakeup])
+  #expect(firstNouns == [.agentEnabled, .idleStarted, .wakeWordHeard, .wakeup])
+  #expect(secondNouns == [.agentEnabled, .idleStarted, .wakeWordHeard, .wakeup])
   #expect(agent.state == .listening)
 }

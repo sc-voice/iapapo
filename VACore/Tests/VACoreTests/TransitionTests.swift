@@ -3,7 +3,7 @@ import Testing
 
 @Test func inactiveEnablesVoiceAgent() {
   #expect(transition(from: .inactive, on: VAEvent(action: .enable, noun: .voiceAgent))
-    == Step(state: .idle, notifications: [.agentEnabled]))
+    == Step(state: .listening, notifications: [.agentEnabled]))
 }
 
 @Test func idleHandlesWakeWordAndDisablesVoiceAgent() {
@@ -69,5 +69,13 @@ import Testing
     == Step(state: .idle))
   #expect(transition(from: .idle, on: .done(.wakeup))
     == Step(state: .idle))
+}
+
+@Test func reachableListsTargetsInTableOrder() {
+  #expect(reachable(from: .inactive) == [.listening])
+  #expect(reachable(from: .idle) == [.listening, .inactive])
+  #expect(reachable(from: .listening) == [.speaking, .thinking, .idle, .inactive])
+  #expect(reachable(from: .thinking) == [.speaking, .idle])
+  #expect(reachable(from: .speaking) == [.listening, .idle])
 }
 

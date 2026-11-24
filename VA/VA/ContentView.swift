@@ -167,8 +167,8 @@ struct ContentView: View {
       enter(.inactive)
       return
     }
-    // Without the mic the agent goes straight to listening, where typing works.
-    let target: VAState = microphone.isDenied ? .listening : .idle
+    // Enabling goes to listening, where typing works without the mic.
+    let target: VAState = .listening
     let entry = VACore.transition(to: target, from: chatState, availability: availability)
     if entry.block == nil {
       voiceAgent.send(VAEvent(action: .enable, noun: .voiceAgent))
@@ -357,6 +357,14 @@ struct HomeView: View {
   @State private var iconbarCountdown: Task<Void, Never>?
   /// The state a bar tap asked for. Its state change does not show the bar again.
   @State private var tappedTarget: VAState?
+  /// Whether accessibility focus is inside the icon bar. Focus keeps the bar open.
+  @AccessibilityFocusState private var barFocused: Bool
+  /// The icon button that holds accessibility focus, if any.
+  @AccessibilityFocusState private var focusedIcon: VAState?
+  /// Keyboard focus: whether the prompt field holds it.
+  @FocusState private var promptFocused: Bool
+  /// Keyboard focus: the icon button that holds it, if any.
+  @FocusState private var keyboardIcon: VAState?
   /// The prompt the user types. Owned by the user.
   @State private var promptEntry = ""
   /// The prompt's insertion point, moved to the end when speech is appended.
@@ -380,6 +388,21 @@ struct HomeView: View {
       guard !Task.isCancelled else { return }
       withAnimation(.easeOut(duration: 0.5)) { barShown = false }
       barHovered = false
+    }
+  }
+
+  /// Moves accessibility focus to the first icon button after a mic tap. Waits
+  /// briefly so the bar has appeared first.
+  private func focusFirstIcon() {
+    // A tap from inactive goes to idle, so the bar will show idle's icons.
+    let from: VAState = state == .inactive ? .idle : state
+    guard let first = AgentView.permittedNext(from: from, micAvailable: !microphone.isDenied).first else { return }
+    Task {
+      try? await Task.sleep(for: .milliseconds(350))
+      // Leaving the prompt dismisses the keyboard; focus moves to the first icon.
+      promptFocused = false
+      keyboardIcon = first
+      focusedIcon = first
     }
   }
 
@@ -422,7 +445,7 @@ struct HomeView: View {
           .minimumScaleFactor(0.5)
       }
       HStack(spacing: 0) {
-        MicButton(
+        AgentStateButton(
           state: state,
           micOn: microphone.isOn,
           level: microphone.level,
@@ -432,8 +455,10 @@ struct HomeView: View {
           action: {
             showBar()
             if state == .inactive { onMicTap() }
+            focusFirstIcon()
           },
           ringOpen: wakeScores.windowAboveAmbient(by: appSettings.ambientWakeDb),
+          damping: 0.3,
         )
         // Hovering the mic button always shows the icon bar.
         .onHover { hovering in
@@ -448,7 +473,7 @@ struct HomeView: View {
           HStack(spacing: 24) {
             Image(systemName: "arrow.right")
               .font(.system(size: 36))
-            AgentView(state: state, micAvailable: !microphone.isDenied, onSelect: { target in
+            AgentView(state: state, micAvailable: !microphone.isDenied, focusedIcon: $focusedIcon, keyboardIcon: $keyboardIcon, onSelect: { target in
               tappedTarget = target
               hideBar()
               onSelect(target)
@@ -456,6 +481,7 @@ struct HomeView: View {
           }
           .padding(.leading, 24)
           .transition(.opacity)
+          .accessibilityFocused($barFocused)
           // While the pointer is over the bar, the countdown is paused. It restarts
           // at the full timeout when the pointer leaves.
           .onHover { hovering in
@@ -476,6 +502,7 @@ struct HomeView: View {
             .lineLimit(3 ... 15)
             .textFieldStyle(.roundedBorder)
             .font(.title3)
+            .focused($promptFocused)
           // Agent area: finalized speech, waiting to move into the prompt.
           Text(speech.pending)
             .font(.title3)
@@ -490,6 +517,12 @@ struct HomeView: View {
     }
     .padding()
     .onAppear { showBar() }
+    // Focus inside the bar holds it open: cancel the hide countdown. Leaving the
+    // bar restarts the countdown.
+    .onChange(of: barFocused) { _, focused in
+      showBar()
+      if focused { iconbarCountdown?.cancel() }
+    }
     .onChange(of: promptEntry) { _, _ in scheduleMove() }
     .onChange(of: speech.pending) { _, _ in scheduleMove() }
     .onChange(of: state) { _, new in
@@ -506,7 +539,7 @@ struct HomeView: View {
 /// The microphone button that turns the voice agent on and off. The ring shows
 /// the mic level while the mic is on. A spinner replaces the icon while waiting.
 /// When permission is denied the button is disabled and shows a red outline.
-struct MicButton: View {
+struct AgentStateButton: View {
   /// The current agent state. The icon follows it while active.
   let state: VAState
   /// Whether the microphone is capturing.
@@ -523,6 +556,11 @@ struct MicButton: View {
   /// Whether the window level is above the ambient floor by the gate margin. Only
   /// idle uses it: the ring is green when true and gray otherwise.
   let ringOpen: Bool
+  /// The fraction of the gap to each new mic level closed per update (about every
+  /// 0.1 s). 1 means no damping.
+  var damping: Float = 1
+  /// The damped level the ring shows.
+  @State private var smoothed: Float = -160
 
   /// The symbol at `tick`: the moon when inactive, a red ladybug slash when idle
   /// without the mic, a keyboard when listening without the mic (typing replaces
@@ -546,7 +584,7 @@ struct MicButton: View {
             LevelRing(
               // Idle shows the level only while the window rule holds.
               value: micOn && (state != .idle || ringOpen)
-                ? Double((level - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
+                ? Double((smoothed - WakeMonitor.ambientSilenceDb) / -WakeMonitor.ambientSilenceDb)
                 : 0,
               fill: state == .idle && !ringOpen ? .gray : .green,
             )
@@ -566,6 +604,9 @@ struct MicButton: View {
     }
     .buttonStyle(.plain)
     .disabled(waiting)
+    .onChange(of: level) { _, new in
+      smoothed += damping * (new - smoothed)
+    }
   }
 }
 
@@ -576,28 +617,23 @@ struct AgentView: View {
   /// Whether the mic can be used. When it cannot, listening is typed, so its
   /// icon is a keyboard.
   let micAvailable: Bool
+  /// Accessibility focus for the icon buttons, keyed by the state each enters.
+  let focusedIcon: AccessibilityFocusState<VAState?>.Binding
+  /// Keyboard focus for the icon buttons, keyed by the state each enters.
+  let keyboardIcon: FocusState<VAState?>.Binding
   /// Called with the state the user taps.
   let onSelect: (VAState) -> Void
 
-  /// The states reachable from `state` in one step, per the state diagram in
-  /// the design doc. The current state is never included.
-  /// - Parameter state: the current state.
-  /// Without the mic, idle is never offered, and inactive offers listening, since
-  /// the user types.
+  /// The states the icon bar offers from `state`: the transition table's reachable
+  /// states, minus thinking (entered by speech, not supported yet). Without the
+  /// mic, idle is never offered, since the user types.
   /// - Parameters:
   ///   - state: the current state.
   ///   - micAvailable: whether the mic can be used.
   static func permittedNext(from state: VAState, micAvailable: Bool) -> [VAState] {
-    let table: [VAState]
-    switch state {
-    case .inactive: table = [.listening]
-    case .idle: table = [.listening, .inactive]
-    case .listening: table = [.speaking, .idle, .inactive]
-    case .thinking: table = [.speaking, .idle]
-    case .speaking: table = [.listening, .idle]
-    }
-    if micAvailable { return table }
-    return table.filter { $0 != .idle }
+    let targets = reachable(from: state).filter { $0 != .thinking }
+    if micAvailable { return targets }
+    return targets.filter { $0 != .idle }
   }
 
   var body: some View {
@@ -619,6 +655,8 @@ struct AgentView: View {
               .foregroundStyle(icon == .idle ? idleColor : .primary)
           }
           .buttonStyle(.plain)
+          .accessibilityFocused(focusedIcon, equals: icon)
+          .focused(keyboardIcon, equals: icon)
         }
       }
       .animation(.easeInOut(duration: 0.5), value: tick)
