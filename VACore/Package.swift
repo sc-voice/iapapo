@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "VACore",
     platforms: [
-        .iOS(.v26),
-        .macOS(.v26),
+        .iOS("27.0"),
+        .macOS("27.0"),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.

@@ -1,0 +1,10 @@
+{
+  "forma": "Task",
+  "id": "0Q8Dh0SD00p7o1u-8Qy-tW",
+  "name": "Document LLM Connection Design",
+  "summary": "Create a documentation file detailing the architectural design of LLM connections in the pi coding agent to assist in Swift implementation.",
+  "updateId": "0Q8Dh0SD00p7o1u-8Qy-tW",
+  "collection": "task",
+  "rawActions": [],
+  "rawReferences": []
+}

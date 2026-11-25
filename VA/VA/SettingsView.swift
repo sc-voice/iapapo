@@ -26,6 +26,7 @@ private let vstackLPadding: CGFloat = 20
 /// The accordion sections in the Settings dialog. At most one is open at a time.
 enum SettingsSection: Hashable {
   case llm
+  case providers
   case listening
   case speaking
   case other
@@ -41,8 +42,39 @@ struct SettingsView: View {
   /// The saved LLM configs, loaded when the screen appears and after the config sheet closes.
   @State private var llmConfigs: [String: LLMConfig] = [:]
   @State private var showingLLMs = false
+  @AppStorage(LLMProviderStore.defaultProviderKey) private var defaultProviderID = ""
+  @AppStorage(LLMProviderStore.defaultModelKey) private var defaultModelID = ""
+  /// The saved LLM providers, loaded when the screen appears and after the provider sheet closes.
+  @State private var providers: [LLMProvider] = []
+  @State private var showingProviders = false
   /// The one accordion section that is open, or nil when all are closed.
   @State private var openSection: SettingsSection? = .llm
+
+  /// The provider the pickers show: the stored default when it still exists, otherwise the first provider.
+  private var currentProvider: LLMProvider? {
+    providers.first { $0.id == defaultProviderID } ?? providers.first
+  }
+
+  /// The model the picker shows: the stored default when the provider still serves it, otherwise its first model.
+  private var currentModelID: String {
+    currentProvider?.model(id: defaultModelID)?.id ?? currentProvider?.models.first?.id ?? ""
+  }
+
+  /// Picking a provider also resets the model to that provider's first model.
+  private var defaultProviderBinding: Binding<String> {
+    Binding(
+      get: { currentProvider?.id ?? "" },
+      set: { newID in
+        defaultProviderID = newID
+        defaultModelID = providers.first { $0.id == newID }?.models.first?.id ?? ""
+      })
+  }
+
+  private var defaultModelBinding: Binding<String> {
+    Binding(
+      get: { currentModelID },
+      set: { defaultModelID = $0 })
+  }
 
   /// The collection the Settings picker reads: the saved configs plus the stored choice.
   private var llmCollection: LLMConfigCollection {
@@ -134,7 +166,51 @@ struct SettingsView: View {
               } // label
             ) // DisclosureGroupo
             DisclosureGroup(
-              isExpanded: expanded(.listening), 
+              isExpanded: expanded(.providers),
+              content: {
+                // Each child is its own Form row, so the button is not sharing a hit area with a picker.
+                Group {
+                  if providers.isEmpty {
+                    Text("No providers yet. A provider is a server, such as oMLX or LM Studio, and the models it serves.")
+                      .font(.footnote)
+                      .foregroundStyle(.secondary)
+                    Button("Add provider") {
+                      showingProviders = true
+                    }
+                  } else {
+                    Picker("Default provider", selection: defaultProviderBinding) {
+                      ForEach(providers) { provider in
+                        Text(provider.displayName).tag(provider.id)
+                      }
+                    }
+                    Picker("Default model", selection: defaultModelBinding) {
+                      ForEach(currentProvider?.models ?? [], id: \.id) { model in
+                        Text(model.displayName).tag(model.id)
+                      }
+                    }
+                    .disabled(currentProvider?.models.isEmpty ?? true)
+                    if currentProvider?.models.isEmpty ?? true {
+                      Text("Fetch models in the provider to choose a default.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+                    Button("Manage providers") {
+                      VALogger.log.info("manage providers tapped")
+                      guard !showingProviders else {
+                        VALogger.log.info("manage providers ignored: sheet already showing")
+                        return
+                      }
+                      showingProviders = true
+                    }
+                  }
+                }
+              }, // content
+              label: {
+                Label("LLM Providers", systemImage: "server.rack")
+              } // label
+            ) // DisclosureGroup
+            DisclosureGroup(
+              isExpanded: expanded(.listening),
               content: {
                 VStack(alignment: .leading, spacing: vstackSpacing) {
                   Text("Sleep when idle")
@@ -207,7 +283,29 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .scrollContentBackground(.hidden)
         .listRowBackground(Color.clear)
-        .onAppear { llmConfigs = LLMConfigStore.load() }
+        .onAppear {
+          llmConfigs = LLMConfigStore.load()
+          providers = LLMProviderStore.load()
+          VALogger.log.info("settings appeared defaultProvider=\(defaultProviderID) defaultModel=\(defaultModelID) providers=\(providers.count)")
+        }
+        .onChange(of: showingProviders) { _, value in
+          VALogger.log.info("state showingProviders=\(value)")
+        }
+        .onChange(of: providers.count) { _, value in
+          VALogger.log.info("state providers count=\(value)")
+        }
+        .onChange(of: defaultProviderID) { _, value in
+          VALogger.log.info("state defaultProvider=\(value)")
+        }
+        .onChange(of: defaultModelID) { _, value in
+          VALogger.log.info("state defaultModel=\(value)")
+        }
+        .sheet(isPresented: $showingProviders, onDismiss: {
+          VALogger.log.info("providers sheet dismissed")
+          providers = LLMProviderStore.load()
+        }) {
+          LLMProviderSheet()
+        }
         .sheet(isPresented: $showingLLMs, onDismiss: { llmConfigs = LLMConfigStore.load() }) {
           LLMConfigSheet()
         }

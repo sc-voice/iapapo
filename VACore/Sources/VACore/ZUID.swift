@@ -100,11 +100,14 @@ public struct ZUID: Hashable, Comparable, Sendable, CustomStringConvertible {
     return try ZUID(bytes: buf)
   }
 
-  /// Text form: 22 characters, with the version nibble set to 15.
-  public var description: String {
+  /// Text form: 22 characters, with the version nibble set to 15. Parse it with `fromString(_:)`.
+  public var text: String {
     let textHi = (hi & ~Self.versionMask) | (Self.versionText << Self.versionShift)
     return OPB63_64.encode(textHi) + OPB63_64.encode(lo)
   }
+
+  /// Same as `text`. Required by `CustomStringConvertible`, so `print` and interpolation show the text form.
+  public var description: String { text }
 
   /// First 11 characters of the text form: the time block.
   public var timeId: String {
@@ -220,6 +223,23 @@ public struct ZUID: Hashable, Comparable, Sendable, CustomStringConvertible {
     for i in 0 ..< 8 {
       buf[offset + i] = UInt8(truncatingIfNeeded: value >> UInt64(56 - 8 * i))
     }
+  }
+}
+
+/// Encodes as the 22-character `text` form, so the JSON shape matches a plain string.
+extension ZUID: Codable {
+  /// Decodes a text form with `fromString(_:)`.
+  ///
+  /// - Throws: `ZUIDError` or `OPB63_64Error` if the string is not a valid ZUID.
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    self = try ZUID.fromString(try container.decode(String.self))
+  }
+
+  /// Encodes as `text`.
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(text)
   }
 }
 

@@ -5,6 +5,7 @@
 
 import Foundation
 import Observation
+import VACore
 
 /// One line in the Developer tab's event log.
 struct LogEntry: Identifiable {
@@ -35,9 +36,7 @@ final class EventLog {
   }
 
   private func append(_ text: String) {
-    // print always reaches the Xcode console; os.Logger messages can be dropped
-    // there.
-    print("[VA] \(text)")
+    VALogger.log.info(text)
     count += 1
     entries.append(LogEntry(sequence: count, time: .now, text: text))
     if entries.count > limit {

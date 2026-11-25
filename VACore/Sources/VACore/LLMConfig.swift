@@ -1,5 +1,6 @@
 import Foundation
 
+/// Deprecated: replaced by `LLMProvider`. Remove once `LLMProvider` is tested and wired into `SettingsView`.
 /// One connection to an LLM server: where it is, how to talk to it, and how much to ask for.
 /// The API key is not encoded. It is stored in the Keychain, keyed by `zuid`.
 public struct LLMConfig: Codable, Equatable, Hashable, Sendable, Identifiable {

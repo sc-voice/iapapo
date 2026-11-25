@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "F29F3FB23093AFC50097F8D4"
-               BuildableName = "VA.app"
+               BuildableName = "IaPapo.app"
                BlueprintName = "VA"
                ReferencedContainer = "container:VA.xcodeproj">
             </BuildableReference>
@@ -58,7 +58,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "F29F3FB23093AFC50097F8D4"
-            BuildableName = "VA.app"
+            BuildableName = "IaPapo.app"
             BlueprintName = "VA"
             ReferencedContainer = "container:VA.xcodeproj">
          </BuildableReference>
@@ -75,7 +75,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "F29F3FB23093AFC50097F8D4"
-            BuildableName = "VA.app"
+            BuildableName = "IaPapo.app"
             BlueprintName = "VA"
             ReferencedContainer = "container:VA.xcodeproj">
          </BuildableReference>
